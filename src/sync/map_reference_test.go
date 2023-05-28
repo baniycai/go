@@ -18,16 +18,8 @@ type mapInterface interface {
 	LoadOrStore(key, value any) (actual any, loaded bool)
 	LoadAndDelete(key any) (value any, loaded bool)
 	Delete(any)
-	Swap(key, value any) (previous any, loaded bool)
-	CompareAndSwap(key, old, new any) (swapped bool)
-	CompareAndDelete(key, old any) (deleted bool)
 	Range(func(key, value any) (shouldContinue bool))
 }
-
-var (
-	_ mapInterface = &RWMutexMap{}
-	_ mapInterface = &DeepCopyMap{}
-)
 
 // RWMutexMap is an implementation of mapInterface using a sync.RWMutex.
 type RWMutexMap struct {
@@ -65,18 +57,6 @@ func (m *RWMutexMap) LoadOrStore(key, value any) (actual any, loaded bool) {
 	return actual, loaded
 }
 
-func (m *RWMutexMap) Swap(key, value any) (previous any, loaded bool) {
-	m.mu.Lock()
-	if m.dirty == nil {
-		m.dirty = make(map[any]any)
-	}
-
-	previous, loaded = m.dirty[key]
-	m.dirty[key] = value
-	m.mu.Unlock()
-	return
-}
-
 func (m *RWMutexMap) LoadAndDelete(key any) (value any, loaded bool) {
 	m.mu.Lock()
 	value, loaded = m.dirty[key]
@@ -93,36 +73,6 @@ func (m *RWMutexMap) Delete(key any) {
 	m.mu.Lock()
 	delete(m.dirty, key)
 	m.mu.Unlock()
-}
-
-func (m *RWMutexMap) CompareAndSwap(key, old, new any) (swapped bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.dirty == nil {
-		return false
-	}
-
-	value, loaded := m.dirty[key]
-	if loaded && value == old {
-		m.dirty[key] = new
-		return true
-	}
-	return false
-}
-
-func (m *RWMutexMap) CompareAndDelete(key, old any) (deleted bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.dirty == nil {
-		return false
-	}
-
-	value, loaded := m.dirty[key]
-	if loaded && value == old {
-		delete(m.dirty, key)
-		return true
-	}
-	return false
 }
 
 func (m *RWMutexMap) Range(f func(key, value any) (shouldContinue bool)) {
@@ -187,16 +137,6 @@ func (m *DeepCopyMap) LoadOrStore(key, value any) (actual any, loaded bool) {
 	return actual, loaded
 }
 
-func (m *DeepCopyMap) Swap(key, value any) (previous any, loaded bool) {
-	m.mu.Lock()
-	dirty := m.dirty()
-	previous, loaded = dirty[key]
-	dirty[key] = value
-	m.clean.Store(dirty)
-	m.mu.Unlock()
-	return
-}
-
 func (m *DeepCopyMap) LoadAndDelete(key any) (value any, loaded bool) {
 	m.mu.Lock()
 	dirty := m.dirty()
@@ -213,43 +153,6 @@ func (m *DeepCopyMap) Delete(key any) {
 	delete(dirty, key)
 	m.clean.Store(dirty)
 	m.mu.Unlock()
-}
-
-func (m *DeepCopyMap) CompareAndSwap(key, old, new any) (swapped bool) {
-	clean, _ := m.clean.Load().(map[any]any)
-	if previous, ok := clean[key]; !ok || previous != old {
-		return false
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	dirty := m.dirty()
-	value, loaded := dirty[key]
-	if loaded && value == old {
-		dirty[key] = new
-		m.clean.Store(dirty)
-		return true
-	}
-	return false
-}
-
-func (m *DeepCopyMap) CompareAndDelete(key, old any) (deleted bool) {
-	clean, _ := m.clean.Load().(map[any]any)
-	if previous, ok := clean[key]; !ok || previous != old {
-		return false
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	dirty := m.dirty()
-	value, loaded := dirty[key]
-	if loaded && value == old {
-		delete(dirty, key)
-		m.clean.Store(dirty)
-		return true
-	}
-	return false
 }
 
 func (m *DeepCopyMap) Range(f func(key, value any) (shouldContinue bool)) {

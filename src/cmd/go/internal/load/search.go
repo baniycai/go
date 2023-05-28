@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"cmd/go/internal/search"
-	"cmd/internal/pkgpattern"
 )
 
 // MatchPackage(pattern, cwd)(p) reports whether package p matches pattern in the working directory cwd.
@@ -30,7 +29,7 @@ func MatchPackage(pattern, cwd string) func(*Package) bool {
 		if pattern == "" {
 			return func(p *Package) bool { return p.Dir == dir }
 		}
-		matchPath := pkgpattern.MatchPattern(pattern)
+		matchPath := search.MatchPattern(pattern)
 		return func(p *Package) bool {
 			// Compute relative path to dir and see if it matches the pattern.
 			rel, err := filepath.Rel(dir, p.Dir)
@@ -51,7 +50,7 @@ func MatchPackage(pattern, cwd string) func(*Package) bool {
 	case pattern == "cmd":
 		return func(p *Package) bool { return p.Standard && strings.HasPrefix(p.ImportPath, "cmd/") }
 	default:
-		matchPath := pkgpattern.MatchPattern(pattern)
+		matchPath := search.MatchPattern(pattern)
 		return func(p *Package) bool { return matchPath(p.ImportPath) }
 	}
 }

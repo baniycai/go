@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build unix || (js && wasm) || windows || plan9
+
 package runtime
 
 import "unsafe"
@@ -46,7 +48,10 @@ var _cgo_setenv unsafe.Pointer   // pointer to C function
 var _cgo_unsetenv unsafe.Pointer // pointer to C function
 
 // Update the C environment if cgo is loaded.
-func setenv_c(k string, v string) {
+// Called from syscall.Setenv.
+//
+//go:linkname syscall_setenv_c syscall.setenv_c
+func syscall_setenv_c(k string, v string) {
 	if _cgo_setenv == nil {
 		return
 	}
@@ -55,7 +60,10 @@ func setenv_c(k string, v string) {
 }
 
 // Update the C environment if cgo is loaded.
-func unsetenv_c(k string) {
+// Called from syscall.unsetenv.
+//
+//go:linkname syscall_unsetenv_c syscall.unsetenv_c
+func syscall_unsetenv_c(k string) {
 	if _cgo_unsetenv == nil {
 		return
 	}

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build unix || (js && wasm) || wasip1 || windows
+//go:build unix || (js && wasm) || windows
 
 package net
 
@@ -65,17 +65,7 @@ func (sd *sysDialer) dialTCP(ctx context.Context, laddr, raddr *TCPAddr) (*TCPCo
 }
 
 func (sd *sysDialer) doDialTCP(ctx context.Context, laddr, raddr *TCPAddr) (*TCPConn, error) {
-	return sd.doDialTCPProto(ctx, laddr, raddr, 0)
-}
-
-func (sd *sysDialer) doDialTCPProto(ctx context.Context, laddr, raddr *TCPAddr, proto int) (*TCPConn, error) {
-	ctrlCtxFn := sd.Dialer.ControlContext
-	if ctrlCtxFn == nil && sd.Dialer.Control != nil {
-		ctrlCtxFn = func(cxt context.Context, network, address string, c syscall.RawConn) error {
-			return sd.Dialer.Control(network, address, c)
-		}
-	}
-	fd, err := internetSocket(ctx, sd.network, laddr, raddr, syscall.SOCK_STREAM, proto, "dial", ctrlCtxFn)
+	fd, err := internetSocket(ctx, sd.network, laddr, raddr, syscall.SOCK_STREAM, 0, "dial", sd.Dialer.Control)
 
 	// TCP has a rarely used mechanism called a 'simultaneous connection' in
 	// which Dial("tcp", addr1, addr2) run on the machine at addr1 can
@@ -105,13 +95,13 @@ func (sd *sysDialer) doDialTCPProto(ctx context.Context, laddr, raddr *TCPAddr, 
 		if err == nil {
 			fd.Close()
 		}
-		fd, err = internetSocket(ctx, sd.network, laddr, raddr, syscall.SOCK_STREAM, proto, "dial", ctrlCtxFn)
+		fd, err = internetSocket(ctx, sd.network, laddr, raddr, syscall.SOCK_STREAM, 0, "dial", sd.Dialer.Control)
 	}
 
 	if err != nil {
 		return nil, err
 	}
-	return newTCPConn(fd, sd.Dialer.KeepAlive, testHookSetKeepAlive), nil
+	return newTCPConn(fd), nil
 }
 
 func selfConnect(fd *netFD, err error) bool {
@@ -149,11 +139,20 @@ func spuriousENOTAVAIL(err error) bool {
 func (ln *TCPListener) ok() bool { return ln != nil && ln.fd != nil }
 
 func (ln *TCPListener) accept() (*TCPConn, error) {
-	fd, err := ln.fd.accept()
+	fd, err := ln.fd.accept() // NOTE 搞了一堆的系统调用，最终返回*netFD
 	if err != nil {
 		return nil, err
 	}
-	return newTCPConn(fd, ln.lc.KeepAlive, nil), nil
+	tc := newTCPConn(fd)
+	if ln.lc.KeepAlive >= 0 {
+		setKeepAlive(fd, true)
+		ka := ln.lc.KeepAlive
+		if ln.lc.KeepAlive == 0 {
+			ka = defaultTCPKeepAlive
+		}
+		setKeepAlivePeriod(fd, ka)
+	}
+	return tc, nil
 }
 
 func (ln *TCPListener) close() error {
@@ -169,17 +168,7 @@ func (ln *TCPListener) file() (*os.File, error) {
 }
 
 func (sl *sysListener) listenTCP(ctx context.Context, laddr *TCPAddr) (*TCPListener, error) {
-	return sl.listenTCPProto(ctx, laddr, 0)
-}
-
-func (sl *sysListener) listenTCPProto(ctx context.Context, laddr *TCPAddr, proto int) (*TCPListener, error) {
-	var ctrlCtxFn func(cxt context.Context, network, address string, c syscall.RawConn) error
-	if sl.ListenConfig.Control != nil {
-		ctrlCtxFn = func(cxt context.Context, network, address string, c syscall.RawConn) error {
-			return sl.ListenConfig.Control(network, address, c)
-		}
-	}
-	fd, err := internetSocket(ctx, sl.network, laddr, nil, syscall.SOCK_STREAM, proto, "listen", ctrlCtxFn)
+	fd, err := internetSocket(ctx, sl.network, laddr, nil, syscall.SOCK_STREAM, 0, "listen", sl.ListenConfig.Control)
 	if err != nil {
 		return nil, err
 	}

@@ -98,7 +98,7 @@ func TestWriterSetBoundary(t *testing.T) {
 		{"(boundary)", true},
 	}
 	for i, tt := range tests {
-		var b strings.Builder
+		var b bytes.Buffer
 		w := NewWriter(&b)
 		err := w.SetBoundary(tt.b)
 		got := err == nil
@@ -145,7 +145,7 @@ func TestWriterBoundaryGoroutines(t *testing.T) {
 }
 
 func TestSortedHeader(t *testing.T) {
-	var buf strings.Builder
+	var buf bytes.Buffer
 	w := NewWriter(&buf)
 	if err := w.SetBoundary("MIMEBOUNDARY"); err != nil {
 		t.Fatalf("Error setting mime boundary: %v", err)

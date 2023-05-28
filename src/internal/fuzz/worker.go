@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"reflect"
@@ -215,16 +216,6 @@ func (w *worker) coordinate(ctx context.Context) error {
 				if result.crasherMsg == "" {
 					result.crasherMsg = err.Error()
 				}
-			}
-			if shouldPrintDebugInfo() {
-				w.coordinator.debugLogf(
-					"input minimized, id: %s, original id: %s, crasher: %t, originally crasher: %t, minimizing took: %s",
-					result.entry.Path,
-					input.entry.Path,
-					result.crasherMsg != "",
-					input.crasherMsg != "",
-					result.totalDuration,
-				)
 			}
 			w.coordinator.resultC <- result
 		}
@@ -802,7 +793,7 @@ func (ws *workerServer) fuzz(ctx context.Context, args fuzzArgs) (resp fuzzRespo
 
 func (ws *workerServer) minimize(ctx context.Context, args minimizeArgs) (resp minimizeResponse) {
 	start := time.Now()
-	defer func() { resp.Duration = time.Since(start) }()
+	defer func() { resp.Duration = time.Now().Sub(start) }()
 	mem := <-ws.memMu
 	defer func() { ws.memMu <- mem }()
 	vals, err := unmarshalCorpusFile(mem.valueCopy())
@@ -967,7 +958,7 @@ func (wc *workerClient) Close() error {
 
 	// Drain fuzzOut and close it. When the server exits, the kernel will close
 	// its end of fuzzOut, and we'll get EOF.
-	if _, err := io.Copy(io.Discard, wc.fuzzOut); err != nil {
+	if _, err := io.Copy(ioutil.Discard, wc.fuzzOut); err != nil {
 		wc.fuzzOut.Close()
 		return err
 	}
@@ -993,13 +984,13 @@ func (wc *workerClient) minimize(ctx context.Context, entryIn CorpusEntry, args 
 	if !ok {
 		return CorpusEntry{}, minimizeResponse{}, errSharedMemClosed
 	}
-	defer func() { wc.memMu <- mem }()
 	mem.header().count = 0
 	inp, err := corpusEntryData(entryIn)
 	if err != nil {
 		return CorpusEntry{}, minimizeResponse{}, err
 	}
 	mem.setValue(inp)
+	defer func() { wc.memMu <- mem }()
 	entryOut = entryIn
 	entryOut.Values, err = unmarshalCorpusFile(inp)
 	if err != nil {
@@ -1082,7 +1073,6 @@ func (wc *workerClient) fuzz(ctx context.Context, entryIn CorpusEntry, args fuzz
 	mem.header().count = 0
 	inp, err := corpusEntryData(entryIn)
 	if err != nil {
-		wc.memMu <- mem
 		return CorpusEntry{}, fuzzResponse{}, true, err
 	}
 	mem.setValue(inp)

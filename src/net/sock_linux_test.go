@@ -5,13 +5,12 @@
 package net
 
 import (
-	"internal/syscall/unix"
 	"testing"
 )
 
 func TestMaxAckBacklog(t *testing.T) {
 	n := 196602
-	major, minor := unix.KernelVersion()
+	major, minor := kernelVersion()
 	backlog := maxAckBacklog(n)
 	expected := 1<<16 - 1
 	if major > 4 || (major == 4 && minor >= 1) {

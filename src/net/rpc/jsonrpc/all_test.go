@@ -5,6 +5,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -261,7 +262,7 @@ func TestMalformedOutput(t *testing.T) {
 }
 
 func TestServerErrorHasNullResult(t *testing.T) {
-	var out strings.Builder
+	var out bytes.Buffer
 	sc := NewServerCodec(struct {
 		io.Reader
 		io.Writer

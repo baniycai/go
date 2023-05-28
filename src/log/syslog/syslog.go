@@ -255,7 +255,7 @@ func (w *Writer) writeAndRetry(p Priority, s string) (int, error) {
 
 	if w.conn != nil {
 		if n, err := w.write(pr, s); err == nil {
-			return n, nil
+			return n, err
 		}
 	}
 	if err := w.connect(); err != nil {

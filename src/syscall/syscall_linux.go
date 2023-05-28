@@ -13,7 +13,6 @@ package syscall
 
 import (
 	"internal/itoa"
-	"runtime"
 	"unsafe"
 )
 
@@ -95,7 +94,6 @@ func Syscall6(trap, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2 uintptr, err Errno) 
 }
 
 func rawSyscallNoError(trap, a1, a2, a3 uintptr) (r1, r2 uintptr)
-func rawVforkSyscall(trap, a1, a2 uintptr) (r1 uintptr, err Errno)
 
 /*
  * Wrapped
@@ -117,13 +115,6 @@ func Creat(path string, mode uint32) (fd int, err error) {
 	return Open(path, O_CREAT|O_WRONLY|O_TRUNC, mode)
 }
 
-func EpollCreate(size int) (fd int, err error) {
-	if size <= 0 {
-		return -1, EINVAL
-	}
-	return EpollCreate1(0)
-}
-
 func isGroupMember(gid int) bool {
 	groups, err := Getgroups()
 	if err != nil {
@@ -138,35 +129,11 @@ func isGroupMember(gid int) bool {
 	return false
 }
 
-func isCapDacOverrideSet() bool {
-	const _CAP_DAC_OVERRIDE = 1
-	var c caps
-	c.hdr.version = _LINUX_CAPABILITY_VERSION_3
-
-	_, _, err := RawSyscall(SYS_CAPGET, uintptr(unsafe.Pointer(&c.hdr)), uintptr(unsafe.Pointer(&c.data[0])), 0)
-
-	return err == 0 && c.data[0].effective&capToMask(_CAP_DAC_OVERRIDE) != 0
-}
-
 //sys	faccessat(dirfd int, path string, mode uint32) (err error)
-//sys	faccessat2(dirfd int, path string, mode uint32, flags int) (err error) = _SYS_faccessat2
 
 func Faccessat(dirfd int, path string, mode uint32, flags int) (err error) {
-	if flags == 0 {
-		return faccessat(dirfd, path, mode)
-	}
-
-	// Attempt to use the newer faccessat2, which supports flags directly,
-	// falling back if it doesn't exist.
-	//
-	// Don't attempt on Android, which does not allow faccessat2 through
-	// its seccomp policy [1] on any version of Android as of 2022-12-20.
-	//
-	// [1] https://cs.android.com/android/platform/superproject/+/master:bionic/libc/SECCOMP_BLOCKLIST_APP.TXT;l=4;drc=dbb8670dfdcc677f7e3b9262e93800fa14c4e417
-	if runtime.GOOS != "android" {
-		if err := faccessat2(dirfd, path, mode, flags); err != ENOSYS && err != EPERM {
-			return err
-		}
+	if flags & ^(_AT_SYMLINK_NOFOLLOW|_AT_EACCESS) != 0 {
+		return EINVAL
 	}
 
 	// The Linux kernel faccessat system call does not take any flags.
@@ -175,8 +142,8 @@ func Faccessat(dirfd int, path string, mode uint32, flags int) (err error) {
 	// Because people naturally expect syscall.Faccessat to act
 	// like C faccessat, we do the same.
 
-	if flags & ^(_AT_SYMLINK_NOFOLLOW|_AT_EACCESS) != 0 {
-		return EINVAL
+	if flags == 0 {
+		return faccessat(dirfd, path, mode)
 	}
 
 	var st Stat_t
@@ -189,16 +156,9 @@ func Faccessat(dirfd int, path string, mode uint32, flags int) (err error) {
 		return nil
 	}
 
-	// Fallback to checking permission bits.
 	var uid int
 	if flags&_AT_EACCESS != 0 {
 		uid = Geteuid()
-		if uid != 0 && isCapDacOverrideSet() {
-			// If CAP_DAC_OVERRIDE is set, file access check is
-			// done by the kernel in the same way as for root
-			// (see generic_permission() in the Linux sources).
-			uid = 0
-		}
 	} else {
 		uid = Getuid()
 	}
@@ -646,7 +606,8 @@ func anyToSockaddr(rsa *RawSockaddrAny) (Sockaddr, error) {
 		for n < len(pp.Path) && pp.Path[n] != 0 {
 			n++
 		}
-		sa.Name = string(unsafe.Slice((*byte)(unsafe.Pointer(&pp.Path[0])), n))
+		bytes := (*[len(pp.Path)]byte)(unsafe.Pointer(&pp.Path[0]))[0:n]
+		sa.Name = string(bytes)
 		return sa, nil
 
 	case AF_INET:
@@ -667,6 +628,21 @@ func anyToSockaddr(rsa *RawSockaddrAny) (Sockaddr, error) {
 		return sa, nil
 	}
 	return nil, EAFNOSUPPORT
+}
+
+func Accept(fd int) (nfd int, sa Sockaddr, err error) {
+	var rsa RawSockaddrAny
+	var len _Socklen = SizeofSockaddrAny
+	nfd, err = accept4(fd, &rsa, &len, 0)
+	if err != nil {
+		return
+	}
+	sa, err = anyToSockaddr(&rsa)
+	if err != nil {
+		Close(nfd)
+		nfd = 0
+	}
+	return
 }
 
 func Accept4(fd int, flags int) (nfd int, sa Sockaddr, err error) {
@@ -827,7 +803,6 @@ func BindToDevice(fd int, device string) (err error) {
 }
 
 //sys	ptrace(request int, pid int, addr uintptr, data uintptr) (err error)
-//sys	ptracePtr(request int, pid int, addr uintptr, data unsafe.Pointer) (err error) = SYS_PTRACE
 
 func ptracePeek(req int, pid int, addr uintptr, out []byte) (count int, err error) {
 	// The peek requests are machine-size oriented, so we wrap it
@@ -845,7 +820,7 @@ func ptracePeek(req int, pid int, addr uintptr, out []byte) (count int, err erro
 	// boundary.
 	n := 0
 	if addr%sizeofPtr != 0 {
-		err = ptracePtr(req, pid, addr-addr%sizeofPtr, unsafe.Pointer(&buf[0]))
+		err = ptrace(req, pid, addr-addr%sizeofPtr, uintptr(unsafe.Pointer(&buf[0])))
 		if err != nil {
 			return 0, err
 		}
@@ -857,7 +832,7 @@ func ptracePeek(req int, pid int, addr uintptr, out []byte) (count int, err erro
 	for len(out) > 0 {
 		// We use an internal buffer to guarantee alignment.
 		// It's not documented if this is necessary, but we're paranoid.
-		err = ptracePtr(req, pid, addr+uintptr(n), unsafe.Pointer(&buf[0]))
+		err = ptrace(req, pid, addr+uintptr(n), uintptr(unsafe.Pointer(&buf[0])))
 		if err != nil {
 			return n, err
 		}
@@ -885,7 +860,7 @@ func ptracePoke(pokeReq int, peekReq int, pid int, addr uintptr, data []byte) (c
 	n := 0
 	if addr%sizeofPtr != 0 {
 		var buf [sizeofPtr]byte
-		err = ptracePtr(peekReq, pid, addr-addr%sizeofPtr, unsafe.Pointer(&buf[0]))
+		err = ptrace(peekReq, pid, addr-addr%sizeofPtr, uintptr(unsafe.Pointer(&buf[0])))
 		if err != nil {
 			return 0, err
 		}
@@ -912,7 +887,7 @@ func ptracePoke(pokeReq int, peekReq int, pid int, addr uintptr, data []byte) (c
 	// Trailing edge.
 	if len(data) > 0 {
 		var buf [sizeofPtr]byte
-		err = ptracePtr(peekReq, pid, addr+uintptr(n), unsafe.Pointer(&buf[0]))
+		err = ptrace(peekReq, pid, addr+uintptr(n), uintptr(unsafe.Pointer(&buf[0])))
 		if err != nil {
 			return n, err
 		}
@@ -937,11 +912,11 @@ func PtracePokeData(pid int, addr uintptr, data []byte) (count int, err error) {
 }
 
 func PtraceGetRegs(pid int, regsout *PtraceRegs) (err error) {
-	return ptracePtr(PTRACE_GETREGS, pid, 0, unsafe.Pointer(regsout))
+	return ptrace(PTRACE_GETREGS, pid, 0, uintptr(unsafe.Pointer(regsout)))
 }
 
 func PtraceSetRegs(pid int, regs *PtraceRegs) (err error) {
-	return ptracePtr(PTRACE_SETREGS, pid, 0, unsafe.Pointer(regs))
+	return ptrace(PTRACE_SETREGS, pid, 0, uintptr(unsafe.Pointer(regs)))
 }
 
 func PtraceSetOptions(pid int, options int) (err error) {
@@ -950,7 +925,7 @@ func PtraceSetOptions(pid int, options int) (err error) {
 
 func PtraceGetEventMsg(pid int) (msg uint, err error) {
 	var data _C_long
-	err = ptracePtr(PTRACE_GETEVENTMSG, pid, 0, unsafe.Pointer(&data))
+	err = ptrace(PTRACE_GETEVENTMSG, pid, 0, uintptr(unsafe.Pointer(&data)))
 	msg = uint(data)
 	return
 }
@@ -1058,7 +1033,7 @@ func Getpgrp() (pid int) {
 //sys	Mknodat(dirfd int, path string, mode uint32, dev int) (err error)
 //sys	Nanosleep(time *Timespec, leftover *Timespec) (err error)
 //sys	PivotRoot(newroot string, putold string) (err error) = SYS_PIVOT_ROOT
-//sysnb prlimit1(pid int, resource int, newlimit *Rlimit, old *Rlimit) (err error) = SYS_PRLIMIT64
+//sysnb prlimit(pid int, resource int, newlimit *Rlimit, old *Rlimit) (err error) = SYS_PRLIMIT64
 //sys	read(fd int, p []byte) (n int, err error)
 //sys	Removexattr(path string, attr string) (err error)
 //sys	Setdomainname(p []byte) (err error)
@@ -1261,14 +1236,3 @@ func Munmap(b []byte) (err error) {
 //sys	Munlock(b []byte) (err error)
 //sys	Mlockall(flags int) (err error)
 //sys	Munlockall() (err error)
-
-// prlimit changes a resource limit. We use a single definition so that
-// we can tell StartProcess to not restore the original NOFILE limit.
-// This is unexported but can be called from x/sys/unix.
-func prlimit(pid int, resource int, newlimit *Rlimit, old *Rlimit) (err error) {
-	err = prlimit1(pid, resource, newlimit, old)
-	if err == nil && newlimit != nil && resource == RLIMIT_NOFILE {
-		origRlimitNofile.Store(Rlimit{0, 0})
-	}
-	return err
-}

@@ -171,7 +171,6 @@ func Kill(pid int, signum Signal) (err error) { return kill(pid, int(signum), 1)
 //sys	Mlock(b []byte) (err error)
 //sys	Mlockall(flags int) (err error)
 //sys	Mprotect(b []byte, prot int) (err error)
-//sys	msync(b []byte, flags int) (err error)
 //sys	Munlock(b []byte) (err error)
 //sys	Munlockall() (err error)
 //sys	Open(path string, mode int, perm uint32) (fd int, err error)
@@ -195,7 +194,7 @@ func Kill(pid int, signum Signal) (err error) { return kill(pid, int(signum), 1)
 //sys	Setprivexec(flag int) (err error)
 //sysnb	Setregid(rgid int, egid int) (err error)
 //sysnb	Setreuid(ruid int, euid int) (err error)
-//sysnb	setrlimit(which int, lim *Rlimit) (err error)
+//sysnb	Setrlimit(which int, lim *Rlimit) (err error)
 //sysnb	Setsid() (pid int, err error)
 //sysnb	Settimeofday(tp *Timeval) (err error)
 //sysnb	Setuid(uid int) (err error)
@@ -227,7 +226,7 @@ func init() {
 
 func fdopendir(fd int) (dir uintptr, err error) {
 	r0, _, e1 := syscallPtr(abi.FuncPCABI0(libc_fdopendir_trampoline), uintptr(fd), 0, 0)
-	dir = r0
+	dir = uintptr(r0)
 	if e1 != 0 {
 		err = errnoErr(e1)
 	}
@@ -311,7 +310,12 @@ func Getdirentries(fd int, buf []byte, basep *uintptr) (n int, err error) {
 			break
 		}
 		// Copy entry into return buffer.
-		copy(buf, unsafe.Slice((*byte)(unsafe.Pointer(&entry)), reclen))
+		s := struct {
+			ptr unsafe.Pointer
+			siz int
+			cap int
+		}{ptr: unsafe.Pointer(&entry), siz: reclen, cap: reclen}
+		copy(buf, *(*[]byte)(unsafe.Pointer(&s)))
 		buf = buf[reclen:]
 		n += reclen
 		cnt++
@@ -326,6 +330,7 @@ func Getdirentries(fd int, buf []byte, basep *uintptr) (n int, err error) {
 	return n, nil
 }
 
+// 这里的方法其实都是调用C的方法，也就是系统调用叭，当然，是通过汇编来调用的。fn是要调用的系统调用(我们传入的fn是go的，但是没有实现，其实它是通过汇编来跟C的函数关联起来的)，后面跟着几个参数。传入uintptr的原因是在汇编调用的时候需要用到方法和它的几个参数的地址
 // Implemented in the runtime package (runtime/sys_darwin.go)
 func syscall(fn, a1, a2, a3 uintptr) (r1, r2 uintptr, err Errno)
 func syscall6(fn, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2 uintptr, err Errno)

@@ -30,18 +30,18 @@ func (*TypeAssertionError) RuntimeError() {}
 func (e *TypeAssertionError) Error() string {
 	inter := "interface"
 	if e._interface != nil {
-		inter = toRType(e._interface).string()
+		inter = e._interface.string()
 	}
-	as := toRType(e.asserted).string()
+	as := e.asserted.string()
 	if e.concrete == nil {
 		return "interface conversion: " + inter + " is nil, not " + as
 	}
-	cs := toRType(e.concrete).string()
+	cs := e.concrete.string()
 	if e.missingMethod == "" {
 		msg := "interface conversion: " + inter + " is " + cs + ", not " + as
 		if cs == as {
 			// provide slightly clearer error message
-			if toRType(e.concrete).pkgpath() != toRType(e.asserted).pkgpath() {
+			if e.concrete.pkgpath() != e.asserted.pkgpath() {
 				msg += " (types from different packages)"
 			} else {
 				msg += " (types from different scopes)"
@@ -151,7 +151,7 @@ var boundsErrorFmts = [...]string{
 	boundsSlice3Acap: "slice bounds out of range [::%x] with capacity %y",
 	boundsSlice3B:    "slice bounds out of range [:%x:%y]",
 	boundsSlice3C:    "slice bounds out of range [%x:%y:]",
-	boundsConvert:    "cannot convert slice with length %y to array or pointer to array with length %x",
+	boundsConvert:    "cannot convert slice with length %y to pointer to array with length %x",
 }
 
 // boundsNegErrorFmts are overriding formats if x is negative. In this case there's no need to report y.
@@ -256,9 +256,9 @@ func printany(i any) {
 
 func printanycustomtype(i any) {
 	eface := efaceOf(&i)
-	typestring := toRType(eface._type).string()
+	typestring := eface._type.string()
 
-	switch eface._type.Kind_ {
+	switch eface._type.kind {
 	case kindString:
 		print(typestring, `("`, *(*string)(eface.data), `")`)
 	case kindBool:
@@ -304,7 +304,7 @@ func printanycustomtype(i any) {
 // It is called from the generated wrapper code.
 func panicwrap() {
 	pc := getcallerpc()
-	name := funcNameForPrint(funcname(findfunc(pc)))
+	name := funcname(findfunc(pc))
 	// name is something like "main.(*T).F".
 	// We want to extract pkg ("main"), typ ("T"), and meth ("F").
 	// Do it by finding the parens.

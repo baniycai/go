@@ -13,7 +13,6 @@ var jniTests = []testCase{
 		Name: "jni.localVariable",
 		In: `package main
 
-// typedef struct _jobject* jobject;
 import "C"
 
 func f() {
@@ -24,7 +23,6 @@ func f() {
 `,
 		Out: `package main
 
-// typedef struct _jobject* jobject;
 import "C"
 
 func f() {
@@ -38,7 +36,6 @@ func f() {
 		Name: "jni.globalVariable",
 		In: `package main
 
-// typedef struct _jobject* jobject;
 import "C"
 
 var x C.jobject = nil
@@ -49,7 +46,6 @@ func f() {
 `,
 		Out: `package main
 
-// typedef struct _jobject* jobject;
 import "C"
 
 var x C.jobject = 0
@@ -63,7 +59,6 @@ func f() {
 		Name: "jni.EqualArgument",
 		In: `package main
 
-// typedef struct _jobject* jobject;
 import "C"
 
 var x C.jobject
@@ -72,7 +67,6 @@ var z = x != nil
 `,
 		Out: `package main
 
-// typedef struct _jobject* jobject;
 import "C"
 
 var x C.jobject
@@ -84,7 +78,6 @@ var z = x != 0
 		Name: "jni.StructField",
 		In: `package main
 
-// typedef struct _jobject* jobject;
 import "C"
 
 type T struct {
@@ -95,7 +88,6 @@ var t = T{x: nil}
 `,
 		Out: `package main
 
-// typedef struct _jobject* jobject;
 import "C"
 
 type T struct {
@@ -109,7 +101,6 @@ var t = T{x: 0}
 		Name: "jni.FunctionArgument",
 		In: `package main
 
-// typedef struct _jobject* jobject;
 import "C"
 
 func f(x C.jobject) {
@@ -121,7 +112,6 @@ func g() {
 `,
 		Out: `package main
 
-// typedef struct _jobject* jobject;
 import "C"
 
 func f(x C.jobject) {
@@ -136,14 +126,12 @@ func g() {
 		Name: "jni.ArrayElement",
 		In: `package main
 
-// typedef struct _jobject* jobject;
 import "C"
 
 var x = [3]C.jobject{nil, nil, nil}
 `,
 		Out: `package main
 
-// typedef struct _jobject* jobject;
 import "C"
 
 var x = [3]C.jobject{0, 0, 0}
@@ -153,14 +141,12 @@ var x = [3]C.jobject{0, 0, 0}
 		Name: "jni.SliceElement",
 		In: `package main
 
-// typedef struct _jobject* jobject;
 import "C"
 
 var x = []C.jobject{nil, nil, nil}
 `,
 		Out: `package main
 
-// typedef struct _jobject* jobject;
 import "C"
 
 var x = []C.jobject{0, 0, 0}
@@ -170,14 +156,12 @@ var x = []C.jobject{0, 0, 0}
 		Name: "jni.MapKey",
 		In: `package main
 
-// typedef struct _jobject* jobject;
 import "C"
 
 var x = map[C.jobject]int{nil: 0}
 `,
 		Out: `package main
 
-// typedef struct _jobject* jobject;
 import "C"
 
 var x = map[C.jobject]int{0: 0}
@@ -187,14 +171,12 @@ var x = map[C.jobject]int{0: 0}
 		Name: "jni.MapValue",
 		In: `package main
 
-// typedef struct _jobject* jobject;
 import "C"
 
 var x = map[int]C.jobject{0: nil}
 `,
 		Out: `package main
 
-// typedef struct _jobject* jobject;
 import "C"
 
 var x = map[int]C.jobject{0: 0}

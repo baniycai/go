@@ -28,21 +28,21 @@ type itabTableType struct {
 
 func itabHashFunc(inter *interfacetype, typ *_type) uintptr {
 	// compiler has provided some good hash codes for us.
-	return uintptr(inter.Type.Hash ^ typ.Hash)
+	return uintptr(inter.typ.hash ^ typ.hash)
 }
 
 func getitab(inter *interfacetype, typ *_type, canfail bool) *itab {
-	if len(inter.Methods) == 0 {
+	if len(inter.mhdr) == 0 {
 		throw("internal error - misuse of itab")
 	}
 
 	// easy case
-	if typ.TFlag&abi.TFlagUncommon == 0 {
+	if typ.tflag&tflagUncommon == 0 {
 		if canfail {
 			return nil
 		}
-		name := toRType(&inter.Type).nameOff(inter.Methods[0].Name)
-		panic(&TypeAssertionError{nil, typ, &inter.Type, name.Name()})
+		name := inter.typ.nameOff(inter.mhdr[0].name)
+		panic(&TypeAssertionError{nil, typ, &inter.typ, name.name()})
 	}
 
 	var m *itab
@@ -64,7 +64,7 @@ func getitab(inter *interfacetype, typ *_type, canfail bool) *itab {
 	}
 
 	// Entry doesn't exist yet. Make a new entry & add it.
-	m = (*itab)(persistentalloc(unsafe.Sizeof(itab{})+uintptr(len(inter.Methods)-1)*goarch.PtrSize, 0, &memstats.other_sys))
+	m = (*itab)(persistentalloc(unsafe.Sizeof(itab{})+uintptr(len(inter.mhdr)-1)*goarch.PtrSize, 0, &memstats.other_sys))
 	m.inter = inter
 	m._type = typ
 	// The hash is used in type switches. However, compiler statically generates itab's
@@ -89,7 +89,7 @@ finish:
 	// The cached result doesn't record which
 	// interface function was missing, so initialize
 	// the itab again to get the missing function name.
-	panic(&TypeAssertionError{concrete: typ, asserted: &inter.Type, missingMethod: m.init()})
+	panic(&TypeAssertionError{concrete: typ, asserted: &inter.typ, missingMethod: m.init()})
 }
 
 // find finds the given interface/type pair in t.
@@ -192,40 +192,39 @@ func (t *itabTableType) add(m *itab) {
 func (m *itab) init() string {
 	inter := m.inter
 	typ := m._type
-	x := typ.Uncommon()
+	x := typ.uncommon()
 
 	// both inter and typ have method sorted by name,
 	// and interface names are unique,
 	// so can iterate over both in lock step;
 	// the loop is O(ni+nt) not O(ni*nt).
-	ni := len(inter.Methods)
-	nt := int(x.Mcount)
-	xmhdr := (*[1 << 16]abi.Method)(add(unsafe.Pointer(x), uintptr(x.Moff)))[:nt:nt]
+	ni := len(inter.mhdr)
+	nt := int(x.mcount)
+	xmhdr := (*[1 << 16]method)(add(unsafe.Pointer(x), uintptr(x.moff)))[:nt:nt]
 	j := 0
 	methods := (*[1 << 16]unsafe.Pointer)(unsafe.Pointer(&m.fun[0]))[:ni:ni]
 	var fun0 unsafe.Pointer
 imethods:
 	for k := 0; k < ni; k++ {
-		i := &inter.Methods[k]
-		itype := toRType(&inter.Type).typeOff(i.Typ)
-		name := toRType(&inter.Type).nameOff(i.Name)
-		iname := name.Name()
-		ipkg := pkgPath(name)
+		i := &inter.mhdr[k]
+		itype := inter.typ.typeOff(i.ityp)
+		name := inter.typ.nameOff(i.name)
+		iname := name.name()
+		ipkg := name.pkgPath()
 		if ipkg == "" {
-			ipkg = inter.PkgPath.Name()
+			ipkg = inter.pkgpath.name()
 		}
 		for ; j < nt; j++ {
 			t := &xmhdr[j]
-			rtyp := toRType(typ)
-			tname := rtyp.nameOff(t.Name)
-			if rtyp.typeOff(t.Mtyp) == itype && tname.Name() == iname {
-				pkgPath := pkgPath(tname)
+			tname := typ.nameOff(t.name)
+			if typ.typeOff(t.mtyp) == itype && tname.name() == iname {
+				pkgPath := tname.pkgPath()
 				if pkgPath == "" {
-					pkgPath = rtyp.nameOff(x.PkgPath).Name()
+					pkgPath = typ.nameOff(x.pkgpath).name()
 				}
-				if tname.IsExported() || pkgPath == ipkg {
+				if tname.isExported() || pkgPath == ipkg {
 					if m != nil {
-						ifn := rtyp.textOff(t.Ifn)
+						ifn := typ.textOff(t.ifn)
 						if k == 0 {
 							fun0 = ifn // we'll set m.fun[0] at the end
 						} else {
@@ -273,7 +272,7 @@ func panicdottypeI(have *itab, want, iface *_type) {
 	panicdottypeE(t, want, iface)
 }
 
-// panicnildottype is called when doing an i.(T) conversion and the interface i is nil.
+// panicnildottype is called when doing a i.(T) conversion and the interface i is nil.
 // want = the static type we're trying to convert to.
 func panicnildottype(want *_type) {
 	panic(&TypeAssertionError{nil, nil, want, ""})
@@ -324,12 +323,12 @@ func convT(t *_type, v unsafe.Pointer) unsafe.Pointer {
 		raceReadObjectPC(t, v, getcallerpc(), abi.FuncPCABIInternal(convT))
 	}
 	if msanenabled {
-		msanread(v, t.Size_)
+		msanread(v, t.size)
 	}
 	if asanenabled {
-		asanread(v, t.Size_)
+		asanread(v, t.size)
 	}
-	x := mallocgc(t.Size_, t, true)
+	x := mallocgc(t.size, t, true)
 	typedmemmove(t, x, v)
 	return x
 }
@@ -339,14 +338,14 @@ func convTnoptr(t *_type, v unsafe.Pointer) unsafe.Pointer {
 		raceReadObjectPC(t, v, getcallerpc(), abi.FuncPCABIInternal(convTnoptr))
 	}
 	if msanenabled {
-		msanread(v, t.Size_)
+		msanread(v, t.size)
 	}
 	if asanenabled {
-		asanread(v, t.Size_)
+		asanread(v, t.size)
 	}
 
-	x := mallocgc(t.Size_, t, false)
-	memmove(x, v, t.Size_)
+	x := mallocgc(t.size, t, false)
+	memmove(x, v, t.size)
 	return x
 }
 
@@ -422,7 +421,7 @@ func convI2I(dst *interfacetype, src *itab) *itab {
 func assertI2I(inter *interfacetype, tab *itab) *itab {
 	if tab == nil {
 		// explicit conversions require non-nil interface value.
-		panic(&TypeAssertionError{nil, nil, &inter.Type, ""})
+		panic(&TypeAssertionError{nil, nil, &inter.typ, ""})
 	}
 	if tab.inter == inter {
 		return tab
@@ -449,7 +448,7 @@ func assertI2I2(inter *interfacetype, i iface) (r iface) {
 func assertE2I(inter *interfacetype, t *_type) *itab {
 	if t == nil {
 		// explicit conversions require non-nil interface value.
-		panic(&TypeAssertionError{nil, nil, &inter.Type, ""})
+		panic(&TypeAssertionError{nil, nil, &inter.typ, ""})
 	}
 	return getitab(inter, t, false)
 }

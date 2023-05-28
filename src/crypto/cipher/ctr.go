@@ -12,11 +12,7 @@
 
 package cipher
 
-import (
-	"bytes"
-	"crypto/internal/alias"
-	"crypto/subtle"
-)
+import "crypto/internal/subtle"
 
 type ctr struct {
 	b       Block
@@ -49,7 +45,7 @@ func NewCTR(block Block, iv []byte) Stream {
 	}
 	return &ctr{
 		b:       block,
-		ctr:     bytes.Clone(iv),
+		ctr:     dup(iv),
 		out:     make([]byte, 0, bufSize),
 		outUsed: 0,
 	}
@@ -80,14 +76,14 @@ func (x *ctr) XORKeyStream(dst, src []byte) {
 	if len(dst) < len(src) {
 		panic("crypto/cipher: output smaller than input")
 	}
-	if alias.InexactOverlap(dst[:len(src)], src) {
+	if subtle.InexactOverlap(dst[:len(src)], src) {
 		panic("crypto/cipher: invalid buffer overlap")
 	}
 	for len(src) > 0 {
 		if x.outUsed >= len(x.out)-x.b.BlockSize() {
 			x.refill()
 		}
-		n := subtle.XORBytes(dst, src, x.out[x.outUsed:])
+		n := xorBytes(dst, src, x.out[x.outUsed:])
 		dst = dst[n:]
 		src = src[n:]
 		x.outUsed += n

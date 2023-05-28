@@ -7,6 +7,7 @@ package abi_test
 import (
 	"internal/abi"
 	"internal/testenv"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,19 +42,15 @@ func TestFuncPCCompileError(t *testing.T) {
 	symabi := filepath.Join(tmpdir, "symabi")
 	obj := filepath.Join(tmpdir, "x.o")
 
-	// Write an importcfg file for the dependencies of the package.
-	importcfgfile := filepath.Join(tmpdir, "hello.importcfg")
-	testenv.WriteImportcfg(t, importcfgfile, nil, "internal/abi")
-
 	// parse assembly code for symabi.
-	cmd := testenv.Command(t, testenv.GoToolPath(t), "tool", "asm", "-gensymabis", "-o", symabi, asmSrc)
+	cmd := exec.Command(testenv.GoToolPath(t), "tool", "asm", "-gensymabis", "-o", symabi, asmSrc)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("go tool asm -gensymabis failed: %v\n%s", err, out)
 	}
 
 	// compile go code.
-	cmd = testenv.Command(t, testenv.GoToolPath(t), "tool", "compile", "-importcfg="+importcfgfile, "-p=p", "-symabis", symabi, "-o", obj, goSrc)
+	cmd = exec.Command(testenv.GoToolPath(t), "tool", "compile", "-p=p", "-symabis", symabi, "-o", obj, goSrc)
 	out, err = cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("go tool compile did not fail")

@@ -24,5 +24,5 @@ func Clone(s string) string {
 	}
 	b := make([]byte, len(s))
 	copy(b, s)
-	return unsafe.String(&b[0], len(b))
+	return *(*string)(unsafe.Pointer(&b))
 }

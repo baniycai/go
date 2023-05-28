@@ -16,9 +16,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
-	"net/http/httptrace"
 	"net/http/internal/ascii"
-	"net/textproto"
 	"net/url"
 	"os"
 	"reflect"
@@ -321,6 +319,7 @@ func TestXForwardedFor(t *testing.T) {
 	defer frontend.Close()
 
 	getReq, _ := http.NewRequest("GET", frontend.URL, nil)
+	getReq.Host = "some-name"
 	getReq.Header.Set("Connection", "close")
 	getReq.Header.Set("X-Forwarded-For", prevForwardedFor)
 	getReq.Close = true
@@ -363,46 +362,6 @@ func TestXForwardedFor_Omit(t *testing.T) {
 	getReq, _ := http.NewRequest("GET", frontend.URL, nil)
 	getReq.Host = "some-name"
 	getReq.Close = true
-	res, err := frontend.Client().Do(getReq)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	res.Body.Close()
-}
-
-func TestReverseProxyRewriteStripsForwarded(t *testing.T) {
-	headers := []string{
-		"Forwarded",
-		"X-Forwarded-For",
-		"X-Forwarded-Host",
-		"X-Forwarded-Proto",
-	}
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		for _, h := range headers {
-			if v := r.Header.Get(h); v != "" {
-				t.Errorf("got %v header: %q", h, v)
-			}
-		}
-	}))
-	defer backend.Close()
-	backendURL, err := url.Parse(backend.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	proxyHandler := &ReverseProxy{
-		Rewrite: func(r *ProxyRequest) {
-			r.SetURL(backendURL)
-		},
-	}
-	frontend := httptest.NewServer(proxyHandler)
-	defer frontend.Close()
-
-	getReq, _ := http.NewRequest("GET", frontend.URL, nil)
-	getReq.Host = "some-name"
-	getReq.Close = true
-	for _, h := range headers {
-		getReq.Header.Set(h, "x")
-	}
 	res, err := frontend.Client().Do(getReq)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
@@ -475,62 +434,6 @@ func TestReverseProxyFlushInterval(t *testing.T) {
 	defer res.Body.Close()
 	if bodyBytes, _ := io.ReadAll(res.Body); string(bodyBytes) != expected {
 		t.Errorf("got body %q; expected %q", bodyBytes, expected)
-	}
-}
-
-type mockFlusher struct {
-	http.ResponseWriter
-	flushed bool
-}
-
-func (m *mockFlusher) Flush() {
-	m.flushed = true
-}
-
-type wrappedRW struct {
-	http.ResponseWriter
-}
-
-func (w *wrappedRW) Unwrap() http.ResponseWriter {
-	return w.ResponseWriter
-}
-
-func TestReverseProxyResponseControllerFlushInterval(t *testing.T) {
-	const expected = "hi"
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(expected))
-	}))
-	defer backend.Close()
-
-	backendURL, err := url.Parse(backend.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	mf := &mockFlusher{}
-	proxyHandler := NewSingleHostReverseProxy(backendURL)
-	proxyHandler.FlushInterval = -1 // flush immediately
-	proxyWithMiddleware := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mf.ResponseWriter = w
-		w = &wrappedRW{mf}
-		proxyHandler.ServeHTTP(w, r)
-	})
-
-	frontend := httptest.NewServer(proxyWithMiddleware)
-	defer frontend.Close()
-
-	req, _ := http.NewRequest("GET", frontend.URL, nil)
-	req.Close = true
-	res, err := frontend.Client().Do(req)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	defer res.Body.Close()
-	if bodyBytes, _ := io.ReadAll(res.Body); string(bodyBytes) != expected {
-		t.Errorf("got body %q; expected %q", bodyBytes, expected)
-	}
-	if !mf.flushed {
-		t.Errorf("response writer was not flushed")
 	}
 }
 
@@ -671,38 +574,46 @@ func TestNilBody(t *testing.T) {
 
 // Issue 15524
 func TestUserAgentHeader(t *testing.T) {
-	var gotUA string
+	const explicitUA = "explicit UA"
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotUA = r.Header.Get("User-Agent")
+		if r.URL.Path == "/noua" {
+			if c := r.Header.Get("User-Agent"); c != "" {
+				t.Errorf("handler got non-empty User-Agent header %q", c)
+			}
+			return
+		}
+		if c := r.Header.Get("User-Agent"); c != explicitUA {
+			t.Errorf("handler got unexpected User-Agent header %q", c)
+		}
 	}))
 	defer backend.Close()
 	backendURL, err := url.Parse(backend.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	proxyHandler := new(ReverseProxy)
+	proxyHandler := NewSingleHostReverseProxy(backendURL)
 	proxyHandler.ErrorLog = log.New(io.Discard, "", 0) // quiet for tests
-	proxyHandler.Director = func(req *http.Request) {
-		req.URL = backendURL
-	}
 	frontend := httptest.NewServer(proxyHandler)
 	defer frontend.Close()
 	frontendClient := frontend.Client()
 
-	for _, sentUA := range []string{"explicit UA", ""} {
-		getReq, _ := http.NewRequest("GET", frontend.URL, nil)
-		getReq.Header.Set("User-Agent", sentUA)
-		getReq.Close = true
-		res, err := frontendClient.Do(getReq)
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		res.Body.Close()
-		if got, want := gotUA, sentUA; got != want {
-			t.Errorf("got forwarded User-Agent %q, want %q", got, want)
-		}
+	getReq, _ := http.NewRequest("GET", frontend.URL, nil)
+	getReq.Header.Set("User-Agent", explicitUA)
+	getReq.Close = true
+	res, err := frontendClient.Do(getReq)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
 	}
+	res.Body.Close()
+
+	getReq, _ = http.NewRequest("GET", frontend.URL+"/noua", nil)
+	getReq.Header.Set("User-Agent", "")
+	getReq.Close = true
+	res, err = frontendClient.Do(getReq)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	res.Body.Close()
 }
 
 type bufferPool struct {
@@ -1118,14 +1029,13 @@ func TestClonesRequestHeaders(t *testing.T) {
 	}
 	rp.ServeHTTP(httptest.NewRecorder(), req)
 
-	for _, h := range []string{
-		"From-Director",
-		"X-Forwarded-For",
-	} {
-		if req.Header.Get(h) != "" {
-			t.Errorf("%v header mutation modified caller's request", h)
-		}
+	if req.Header.Get("From-Director") == "1" {
+		t.Error("Director header mutation modified caller's request")
 	}
+	if req.Header.Get("X-Forwarded-For") != "" {
+		t.Error("X-Forward-For header mutation modified caller's request")
+	}
+
 }
 
 type roundTripperFunc func(req *http.Request) (*http.Response, error)
@@ -1138,7 +1048,7 @@ func TestModifyResponseClosesBody(t *testing.T) {
 	req, _ := http.NewRequest("GET", "http://foo.tld/", nil)
 	req.RemoteAddr = "1.2.3.4:56789"
 	closeCheck := new(checkCloser)
-	logBuf := new(strings.Builder)
+	logBuf := new(bytes.Buffer)
 	outErr := errors.New("ModifyResponse error")
 	rp := &ReverseProxy{
 		Director: func(req *http.Request) {},
@@ -1578,40 +1488,6 @@ func TestUnannouncedTrailer(t *testing.T) {
 
 }
 
-func TestSetURL(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(r.Host))
-	}))
-	defer backend.Close()
-	backendURL, err := url.Parse(backend.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	proxyHandler := &ReverseProxy{
-		Rewrite: func(r *ProxyRequest) {
-			r.SetURL(backendURL)
-		},
-	}
-	frontend := httptest.NewServer(proxyHandler)
-	defer frontend.Close()
-	frontendClient := frontend.Client()
-
-	res, err := frontendClient.Get(frontend.URL)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	defer res.Body.Close()
-
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		t.Fatalf("Reading body: %v", err)
-	}
-
-	if got, want := string(body), backendURL.Host; got != want {
-		t.Errorf("backend got Host %q, want %q", got, want)
-	}
-}
-
 func TestSingleJoinSlash(t *testing.T) {
 	tests := []struct {
 		slasha   string
@@ -1662,111 +1538,6 @@ func TestJoinURLPath(t *testing.T) {
 	}
 }
 
-func TestReverseProxyRewriteReplacesOut(t *testing.T) {
-	const content = "response_content"
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(content))
-	}))
-	defer backend.Close()
-	proxyHandler := &ReverseProxy{
-		Rewrite: func(r *ProxyRequest) {
-			r.Out, _ = http.NewRequest("GET", backend.URL, nil)
-		},
-	}
-	frontend := httptest.NewServer(proxyHandler)
-	defer frontend.Close()
-
-	res, err := frontend.Client().Get(frontend.URL)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	defer res.Body.Close()
-	body, _ := io.ReadAll(res.Body)
-	if got, want := string(body), content; got != want {
-		t.Errorf("got response %q, want %q", got, want)
-	}
-}
-
-func Test1xxResponses(t *testing.T) {
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-		h.Add("Link", "</style.css>; rel=preload; as=style")
-		h.Add("Link", "</script.js>; rel=preload; as=script")
-		w.WriteHeader(http.StatusEarlyHints)
-
-		h.Add("Link", "</foo.js>; rel=preload; as=script")
-		w.WriteHeader(http.StatusProcessing)
-
-		w.Write([]byte("Hello"))
-	}))
-	defer backend.Close()
-	backendURL, err := url.Parse(backend.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	proxyHandler := NewSingleHostReverseProxy(backendURL)
-	proxyHandler.ErrorLog = log.New(io.Discard, "", 0) // quiet for tests
-	frontend := httptest.NewServer(proxyHandler)
-	defer frontend.Close()
-	frontendClient := frontend.Client()
-
-	checkLinkHeaders := func(t *testing.T, expected, got []string) {
-		t.Helper()
-
-		if len(expected) != len(got) {
-			t.Errorf("Expected %d link headers; got %d", len(expected), len(got))
-		}
-
-		for i := range expected {
-			if i >= len(got) {
-				t.Errorf("Expected %q link header; got nothing", expected[i])
-
-				continue
-			}
-
-			if expected[i] != got[i] {
-				t.Errorf("Expected %q link header; got %q", expected[i], got[i])
-			}
-		}
-	}
-
-	var respCounter uint8
-	trace := &httptrace.ClientTrace{
-		Got1xxResponse: func(code int, header textproto.MIMEHeader) error {
-			switch code {
-			case http.StatusEarlyHints:
-				checkLinkHeaders(t, []string{"</style.css>; rel=preload; as=style", "</script.js>; rel=preload; as=script"}, header["Link"])
-			case http.StatusProcessing:
-				checkLinkHeaders(t, []string{"</style.css>; rel=preload; as=style", "</script.js>; rel=preload; as=script", "</foo.js>; rel=preload; as=script"}, header["Link"])
-			default:
-				t.Error("Unexpected 1xx response")
-			}
-
-			respCounter++
-
-			return nil
-		},
-	}
-	req, _ := http.NewRequestWithContext(httptrace.WithClientTrace(context.Background(), trace), "GET", frontend.URL, nil)
-
-	res, err := frontendClient.Do(req)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-
-	defer res.Body.Close()
-
-	if respCounter != 2 {
-		t.Errorf("Expected 2 1xx responses; got %d", respCounter)
-	}
-	checkLinkHeaders(t, []string{"</style.css>; rel=preload; as=style", "</script.js>; rel=preload; as=script", "</foo.js>; rel=preload; as=script"}, res.Header["Link"])
-
-	body, _ := io.ReadAll(res.Body)
-	if string(body) != "Hello" {
-		t.Errorf("Read body %q; want Hello", body)
-	}
-}
-
 const (
 	testWantsCleanQuery = true
 	testWantsRawQuery   = false
@@ -1794,27 +1565,6 @@ func TestReverseProxyQueryParameterSmugglingDirectorParsesForm(t *testing.T) {
 			oldDirector(r)
 		}
 		return proxyHandler
-	})
-}
-
-func TestReverseProxyQueryParameterSmugglingRewrite(t *testing.T) {
-	testReverseProxyQueryParameterSmuggling(t, testWantsCleanQuery, func(u *url.URL) *ReverseProxy {
-		return &ReverseProxy{
-			Rewrite: func(r *ProxyRequest) {
-				r.SetURL(u)
-			},
-		}
-	})
-}
-
-func TestReverseProxyQueryParameterSmugglingRewritePreservesRawQuery(t *testing.T) {
-	testReverseProxyQueryParameterSmuggling(t, testWantsRawQuery, func(u *url.URL) *ReverseProxy {
-		return &ReverseProxy{
-			Rewrite: func(r *ProxyRequest) {
-				r.SetURL(u)
-				r.Out.URL.RawQuery = r.In.URL.RawQuery
-			},
-		}
 	})
 }
 

@@ -41,8 +41,7 @@ func nilcheckelim(f *Func) {
 	// map from value ID to bool indicating if value is known to be non-nil
 	// in the current dominator path being walked. This slice is updated by
 	// walkStates to maintain the known non-nil values.
-	nonNilValues := f.Cache.allocBoolSlice(f.NumValues())
-	defer f.Cache.freeBoolSlice(nonNilValues)
+	nonNilValues := make([]bool, f.NumValues())
 
 	// make an initial pass identifying any non-nil values
 	for _, b := range f.Blocks {
@@ -87,8 +86,7 @@ func nilcheckelim(f *Func) {
 	// allocate auxiliary date structures for computing store order
 	sset := f.newSparseSet(f.NumValues())
 	defer f.retSparseSet(sset)
-	storeNumber := f.Cache.allocInt32Slice(f.NumValues())
-	defer f.Cache.freeInt32Slice(storeNumber)
+	storeNumber := make([]int32, f.NumValues())
 
 	// perform a depth first walk of the dominee tree
 	for len(work) > 0 {
@@ -238,7 +236,7 @@ func nilcheckelim2(f *Func) {
 				continue
 			}
 			if v.Type.IsMemory() || v.Type.IsTuple() && v.Type.FieldType(1).IsMemory() {
-				if v.Op == OpVarLive || (v.Op == OpVarDef && !v.Aux.(*ir.Name).Type().HasPointers()) {
+				if v.Op == OpVarKill || v.Op == OpVarLive || (v.Op == OpVarDef && !v.Aux.(*ir.Name).Type().HasPointers()) {
 					// These ops don't really change memory.
 					continue
 					// Note: OpVarDef requires that the defined variable not have pointers.
@@ -310,7 +308,7 @@ func nilcheckelim2(f *Func) {
 				}
 				// This instruction is guaranteed to fault if ptr is nil.
 				// Any previous nil check op is unnecessary.
-				unnecessary.set(ptr.ID, int32(i))
+				unnecessary.set(ptr.ID, int32(i), src.NoXPos)
 			}
 		}
 		// Remove values we've clobbered with OpUnknown.

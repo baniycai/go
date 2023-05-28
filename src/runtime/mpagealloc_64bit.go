@@ -7,6 +7,7 @@
 package runtime
 
 import (
+	"runtime/internal/atomic"
 	"unsafe"
 )
 
@@ -68,7 +69,7 @@ var levelLogPages = [summaryLevels]uint{
 // sysInit performs architecture-dependent initialization of fields
 // in pageAlloc. pageAlloc should be uninitialized except for sysStat
 // if any runtime statistic should be updated.
-func (p *pageAlloc) sysInit(test bool) {
+func (p *pageAlloc) sysInit() {
 	// Reserve memory for each level. This will get mapped in
 	// as R/W by setArenas.
 	for l, shift := range levelShift {
@@ -85,12 +86,18 @@ func (p *pageAlloc) sysInit(test bool) {
 		sl := notInHeapSlice{(*notInHeap)(r), 0, entries}
 		p.summary[l] = *(*[]pallocSum)(unsafe.Pointer(&sl))
 	}
+
+	// Set up the scavenge index.
+	nbytes := uintptr(1<<heapAddrBits) / pallocChunkBytes / 8
+	r := sysReserve(nil, nbytes)
+	sl := notInHeapSlice{(*notInHeap)(r), int(nbytes), int(nbytes)}
+	p.scav.index.chunks = *(*[]atomic.Uint8)(unsafe.Pointer(&sl))
 }
 
 // sysGrow performs architecture-dependent operations on heap
 // growth for the page allocator, such as mapping in new memory
 // for summaries. It also updates the length of the slices in
-// p.summary.
+// [.summary.
 //
 // base is the base of the newly-added heap memory and limit is
 // the first address past the end of the newly-added heap memory.
@@ -124,7 +131,7 @@ func (p *pageAlloc) sysGrow(base, limit uintptr) {
 		}
 	}
 
-	// addrRangeToSumAddrRange is a convenience function that converts
+	// addrRangeToSumAddrRange is a convienience function that converts
 	// an address range r to the address range of the given summary level
 	// that stores the summaries for r.
 	addrRangeToSumAddrRange := func(level int, r addrRange) addrRange {
@@ -161,9 +168,8 @@ func (p *pageAlloc) sysGrow(base, limit uintptr) {
 
 		// Prune need down to what needs to be newly mapped. Some parts of it may
 		// already be mapped by what inUse describes due to page alignment requirements
-		// for mapping. Because this function will never be asked to remap the same
-		// memory twice, it should never be possible to prune in such a way that causes
-		// need to be split.
+		// for mapping. prune's invariants are guaranteed by the fact that this
+		// function will never be asked to remap the same memory twice.
 		if inUseIndex > 0 {
 			need = need.subtract(addrRangeToSumAddrRange(l, p.inUse.ranges[inUseIndex-1]))
 		}
@@ -182,18 +188,17 @@ func (p *pageAlloc) sysGrow(base, limit uintptr) {
 	}
 
 	// Update the scavenge index.
-	p.summaryMappedReady += p.scav.index.sysGrow(base, limit, p.sysStat)
+	p.summaryMappedReady += p.scav.index.grow(base, limit, p.sysStat)
 }
 
-// sysGrow increases the index's backing store in response to a heap growth.
+// grow increases the index's backing store in response to a heap growth.
 //
 // Returns the amount of memory added to sysStat.
-func (s *scavengeIndex) sysGrow(base, limit uintptr, sysStat *sysMemStat) uintptr {
+func (s *scavengeIndex) grow(base, limit uintptr, sysStat *sysMemStat) uintptr {
 	if base%pallocChunkBytes != 0 || limit%pallocChunkBytes != 0 {
 		print("runtime: base = ", hex(base), ", limit = ", hex(limit), "\n")
 		throw("sysGrow bounds not aligned to pallocChunkBytes")
 	}
-	scSize := unsafe.Sizeof(atomicScavChunkData{})
 	// Map and commit the pieces of chunks that we need.
 	//
 	// We always map the full range of the minimum heap address to the
@@ -207,24 +212,24 @@ func (s *scavengeIndex) sysGrow(base, limit uintptr, sysStat *sysMemStat) uintpt
 	// index.
 	haveMin := s.min.Load()
 	haveMax := s.max.Load()
-	needMin := alignDown(uintptr(chunkIndex(base)), physPageSize/scSize)
-	needMax := alignUp(uintptr(chunkIndex(limit)), physPageSize/scSize)
+	needMin := int32(alignDown(uintptr(chunkIndex(base)/8), physPageSize))
+	needMax := int32(alignUp(uintptr((chunkIndex(limit)+7)/8), physPageSize))
 	// Extend the range down to what we have, if there's no overlap.
 	if needMax < haveMin {
 		needMax = haveMin
 	}
-	if haveMax != 0 && needMin > haveMax {
+	if needMin > haveMax {
 		needMin = haveMax
 	}
 	have := makeAddrRange(
 		// Avoid a panic from indexing one past the last element.
-		uintptr(unsafe.Pointer(&s.chunks[0]))+haveMin*scSize,
-		uintptr(unsafe.Pointer(&s.chunks[0]))+haveMax*scSize,
+		uintptr(unsafe.Pointer(&s.chunks[0]))+uintptr(haveMin),
+		uintptr(unsafe.Pointer(&s.chunks[0]))+uintptr(haveMax),
 	)
 	need := makeAddrRange(
 		// Avoid a panic from indexing one past the last element.
-		uintptr(unsafe.Pointer(&s.chunks[0]))+needMin*scSize,
-		uintptr(unsafe.Pointer(&s.chunks[0]))+needMax*scSize,
+		uintptr(unsafe.Pointer(&s.chunks[0]))+uintptr(needMin),
+		uintptr(unsafe.Pointer(&s.chunks[0]))+uintptr(needMax),
 	)
 	// Subtract any overlap from rounding. We can't re-map memory because
 	// it'll be zeroed.
@@ -242,17 +247,11 @@ func (s *scavengeIndex) sysGrow(base, limit uintptr, sysStat *sysMemStat) uintpt
 			s.max.Store(needMax)
 		}
 	}
+	// Update minHeapIdx. Note that even if there's no mapping work to do,
+	// we may still have a new, lower minimum heap address.
+	minHeapIdx := s.minHeapIdx.Load()
+	if baseIdx := int32(chunkIndex(base) / 8); minHeapIdx == 0 || baseIdx < minHeapIdx {
+		s.minHeapIdx.Store(baseIdx)
+	}
 	return need.size()
-}
-
-// sysInit initializes the scavengeIndex' chunks array.
-//
-// Returns the amount of memory added to sysStat.
-func (s *scavengeIndex) sysInit(test bool, sysStat *sysMemStat) uintptr {
-	n := uintptr(1<<heapAddrBits) / pallocChunkBytes
-	nbytes := n * unsafe.Sizeof(atomicScavChunkData{})
-	r := sysReserve(nil, nbytes)
-	sl := notInHeapSlice{(*notInHeap)(r), int(n), int(n)}
-	s.chunks = *(*[]atomicScavChunkData)(unsafe.Pointer(&sl))
-	return 0 // All memory above is mapped Reserved.
 }

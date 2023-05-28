@@ -85,7 +85,7 @@ func (ctxt *Link) LookupABI(name string, abi ABI) *LSym {
 	return ctxt.LookupABIInit(name, abi, nil)
 }
 
-// LookupABIInit looks up a symbol with the given ABI.
+// LookupABI looks up a symbol with the given ABI.
 // If it does not exist, it creates it and
 // passes it to init for one-time initialization.
 func (ctxt *Link) LookupABIInit(name string, abi ABI, init func(s *LSym)) *LSym {
@@ -349,7 +349,6 @@ func (ctxt *Link) traverseSyms(flag traverseFlag, fn func(*LSym)) {
 		}
 	}
 	lists := [][]*LSym{ctxt.Text, ctxt.Data}
-	files := ctxt.PosTable.FileTable()
 	for _, list := range lists {
 		for _, s := range list {
 			if flag&traverseDefs != 0 {
@@ -366,9 +365,7 @@ func (ctxt *Link) traverseSyms(flag traverseFlag, fn func(*LSym)) {
 					f := func(parent *LSym, aux *LSym) {
 						fn(aux)
 					}
-					ctxt.traverseFuncAux(flag, s, f, files)
-				} else if v := s.VarInfo(); v != nil {
-					fnNoNil(v.dwarfInfoSym)
+					ctxt.traverseFuncAux(flag, s, f)
 				}
 			}
 			if flag&traversePcdata != 0 && s.Type == objabi.STEXT {
@@ -385,7 +382,7 @@ func (ctxt *Link) traverseSyms(flag traverseFlag, fn func(*LSym)) {
 	}
 }
 
-func (ctxt *Link) traverseFuncAux(flag traverseFlag, fsym *LSym, fn func(parent *LSym, aux *LSym), files []string) {
+func (ctxt *Link) traverseFuncAux(flag traverseFlag, fsym *LSym, fn func(parent *LSym, aux *LSym)) {
 	fninfo := fsym.Func()
 	pc := &fninfo.Pcln
 	if flag&traverseAux == 0 {
@@ -398,6 +395,7 @@ func (ctxt *Link) traverseFuncAux(flag traverseFlag, fsym *LSym, fn func(parent 
 			fn(fsym, d)
 		}
 	}
+	files := ctxt.PosTable.FileTable()
 	usedFiles := make([]goobj.CUFileIndex, 0, len(pc.UsedFiles))
 	for f := range pc.UsedFiles {
 		usedFiles = append(usedFiles, f)
@@ -412,22 +410,22 @@ func (ctxt *Link) traverseFuncAux(flag traverseFlag, fsym *LSym, fn func(parent 
 		if call.Func != nil {
 			fn(fsym, call.Func)
 		}
-		f, _ := ctxt.getFileSymbolAndLine(call.Pos)
+		f, _ := linkgetlineFromPos(ctxt, call.Pos)
 		if filesym := ctxt.Lookup(f); filesym != nil {
 			fn(fsym, filesym)
 		}
 	}
 
-	auxsyms := []*LSym{fninfo.dwarfRangesSym, fninfo.dwarfLocSym, fninfo.dwarfDebugLinesSym, fninfo.dwarfInfoSym, fninfo.WasmImportSym, fninfo.sehUnwindInfoSym}
-	for _, s := range auxsyms {
-		if s == nil || s.Size == 0 {
+	dwsyms := []*LSym{fninfo.dwarfRangesSym, fninfo.dwarfLocSym, fninfo.dwarfDebugLinesSym, fninfo.dwarfInfoSym}
+	for _, dws := range dwsyms {
+		if dws == nil || dws.Size == 0 {
 			continue
 		}
-		fn(fsym, s)
+		fn(fsym, dws)
 		if flag&traverseRefs != 0 {
-			for _, r := range s.R {
+			for _, r := range dws.R {
 				if r.Sym != nil {
-					fn(s, r.Sym)
+					fn(dws, r.Sym)
 				}
 			}
 		}
@@ -437,7 +435,6 @@ func (ctxt *Link) traverseFuncAux(flag traverseFlag, fsym *LSym, fn func(parent 
 // Traverse aux symbols, calling fn for each sym/aux pair.
 func (ctxt *Link) traverseAuxSyms(flag traverseFlag, fn func(parent *LSym, aux *LSym)) {
 	lists := [][]*LSym{ctxt.Text, ctxt.Data}
-	files := ctxt.PosTable.FileTable()
 	for _, list := range lists {
 		for _, s := range list {
 			if s.Gotype != nil {
@@ -445,11 +442,10 @@ func (ctxt *Link) traverseAuxSyms(flag traverseFlag, fn func(parent *LSym, aux *
 					fn(s, s.Gotype)
 				}
 			}
-			if s.Type == objabi.STEXT {
-				ctxt.traverseFuncAux(flag, s, fn, files)
-			} else if v := s.VarInfo(); v != nil && v.dwarfInfoSym != nil {
-				fn(s, v.dwarfInfoSym)
+			if s.Type != objabi.STEXT {
+				continue
 			}
+			ctxt.traverseFuncAux(flag, s, fn)
 		}
 	}
 }

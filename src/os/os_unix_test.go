@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build unix || (js && wasm) || wasip1
+//go:build unix || (js && wasm)
 
 package os_test
 
 import (
-	"internal/testenv"
 	"io"
+	"os"
 	. "os"
 	"path/filepath"
 	"runtime"
@@ -40,11 +40,6 @@ func checkUidGid(t *testing.T, path string, uid, gid int) {
 }
 
 func TestChown(t *testing.T) {
-	if runtime.GOOS == "wasip1" {
-		t.Skip("file ownership not supported on " + runtime.GOOS)
-	}
-	t.Parallel()
-
 	// Use TempDir() to make sure we're on a local file system,
 	// so that the group ids returned by Getgroups will be allowed
 	// on the file. On NFS, the Getgroups groups are
@@ -88,11 +83,6 @@ func TestChown(t *testing.T) {
 }
 
 func TestFileChown(t *testing.T) {
-	if runtime.GOOS == "wasip1" {
-		t.Skip("file ownership not supported on " + runtime.GOOS)
-	}
-	t.Parallel()
-
 	// Use TempDir() to make sure we're on a local file system,
 	// so that the group ids returned by Getgroups will be allowed
 	// on the file. On NFS, the Getgroups groups are
@@ -136,9 +126,6 @@ func TestFileChown(t *testing.T) {
 }
 
 func TestLchown(t *testing.T) {
-	testenv.MustHaveSymlink(t)
-	t.Parallel()
-
 	// Use TempDir() to make sure we're on a local file system,
 	// so that the group ids returned by Getgroups will be allowed
 	// on the file. On NFS, the Getgroups groups are
@@ -203,7 +190,7 @@ func TestReaddirRemoveRace(t *testing.T) {
 	}
 	dir := newDir("TestReaddirRemoveRace", t)
 	defer RemoveAll(dir)
-	if err := WriteFile(filepath.Join(dir, "some-file"), []byte("hello"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "some-file"), []byte("hello"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	d, err := Open(dir)
@@ -227,11 +214,6 @@ func TestReaddirRemoveRace(t *testing.T) {
 
 // Issue 23120: respect umask when doing Mkdir with the sticky bit
 func TestMkdirStickyUmask(t *testing.T) {
-	if runtime.GOOS == "wasip1" {
-		t.Skip("file permissions not supported on " + runtime.GOOS)
-	}
-	t.Parallel()
-
 	const umask = 0077
 	dir := newDir("TestMkdirStickyUmask", t)
 	defer RemoveAll(dir)
@@ -252,7 +234,7 @@ func TestMkdirStickyUmask(t *testing.T) {
 
 // See also issues: 22939, 24331
 func newFileTest(t *testing.T, blocking bool) {
-	if runtime.GOOS == "js" || runtime.GOOS == "wasip1" {
+	if runtime.GOOS == "js" {
 		t.Skipf("syscall.Pipe is not available on %s.", runtime.GOOS)
 	}
 
@@ -312,14 +294,6 @@ func TestNewFileBlock(t *testing.T) {
 func TestNewFileNonBlock(t *testing.T) {
 	t.Parallel()
 	newFileTest(t, false)
-}
-
-func TestNewFileInvalid(t *testing.T) {
-	t.Parallel()
-	const negOne = ^uintptr(0)
-	if f := NewFile(negOne, "invalid"); f != nil {
-		t.Errorf("NewFile(-1) got %v want nil", f)
-	}
 }
 
 func TestSplitPath(t *testing.T) {

@@ -103,12 +103,7 @@ func ExampleReverseProxy() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	frontendProxy := httptest.NewServer(&httputil.ReverseProxy{
-		Rewrite: func(r *httputil.ProxyRequest) {
-			r.SetXForwarded()
-			r.SetURL(rpURL)
-		},
-	})
+	frontendProxy := httptest.NewServer(httputil.NewSingleHostReverseProxy(rpURL))
 	defer frontendProxy.Close()
 
 	resp, err := http.Get(frontendProxy.URL)

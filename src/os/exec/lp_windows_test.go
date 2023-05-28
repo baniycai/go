@@ -164,7 +164,7 @@ func (test lookPathTest) run(t *testing.T, tmpdir, printpathExe string) {
 	// Run "cmd.exe /c test.searchFor" with new environment and
 	// work directory set. All candidates are copies of printpath.exe.
 	// These will output their program paths when run.
-	should, errCmd := test.runProg(t, env, testenv.Command(t, "cmd", "/c", test.searchFor))
+	should, errCmd := test.runProg(t, env, exec.Command("cmd", "/c", test.searchFor))
 	// Run the lookpath program with new environment and work directory set.
 	have, errLP := test.runProg(t, env, helperCommand(t, "lookpath", test.searchFor))
 	// Compare results.
@@ -334,21 +334,12 @@ var lookPathTests = []lookPathTest{
 }
 
 func TestLookPathWindows(t *testing.T) {
-	if testing.Short() {
-		maySkipHelperCommand("lookpath")
-		t.Skipf("skipping test in short mode that would build a helper binary")
-	}
-	t.Parallel()
-
 	tmp := t.TempDir()
 	printpathExe := buildPrintPathExe(t, tmp)
 
 	// Run all tests.
 	for i, test := range lookPathTests {
-		i, test := i, test
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
-			t.Parallel()
-
 			dir := filepath.Join(tmp, "d"+strconv.Itoa(i))
 			err := os.Mkdir(dir, 0700)
 			if err != nil {
@@ -533,28 +524,17 @@ var commandTests = []commandTest{
 }
 
 func TestCommand(t *testing.T) {
-	if testing.Short() {
-		maySkipHelperCommand("exec")
-		t.Skipf("skipping test in short mode that would build a helper binary")
-	}
-	t.Parallel()
-
 	tmp := t.TempDir()
 	printpathExe := buildPrintPathExe(t, tmp)
 
 	// Run all tests.
 	for i, test := range commandTests {
-		i, test := i, test
-		t.Run(fmt.Sprint(i), func(t *testing.T) {
-			t.Parallel()
-
-			dir := filepath.Join(tmp, "d"+strconv.Itoa(i))
-			err := os.Mkdir(dir, 0700)
-			if err != nil {
-				t.Fatal("Mkdir failed: ", err)
-			}
-			test.run(t, dir, printpathExe)
-		})
+		dir := filepath.Join(tmp, "d"+strconv.Itoa(i))
+		err := os.Mkdir(dir, 0700)
+		if err != nil {
+			t.Fatal("Mkdir failed: ", err)
+		}
+		test.run(t, dir, printpathExe)
 	}
 }
 
@@ -572,7 +552,7 @@ func buildPrintPathExe(t *testing.T, dir string) string {
 		t.Fatalf("failed to execute template: %v", err)
 	}
 	outname := name + ".exe"
-	cmd := testenv.Command(t, testenv.GoToolPath(t), "build", "-o", outname, srcname)
+	cmd := exec.Command(testenv.GoToolPath(t), "build", "-o", outname, srcname)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -587,6 +567,7 @@ package main
 import (
 	"os"
 	"syscall"
+	"unicode/utf16"
 	"unsafe"
 )
 
@@ -598,7 +579,7 @@ func getMyName() (string, error) {
 	if n == 0 {
 		return "", err
 	}
-	return syscall.UTF16ToString(b[0:n]), nil
+	return string(utf16.Decode(b[0:n])), nil
 }
 
 func main() {

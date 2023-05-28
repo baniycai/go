@@ -5,7 +5,7 @@
 package main_test
 
 import (
-	"internal/testenv"
+	"go/build"
 	"runtime"
 	"testing"
 
@@ -32,7 +32,7 @@ func TestNoteReading(t *testing.T) {
 	}
 
 	switch {
-	case !testenv.HasCGO():
+	case !build.Default.CgoEnabled:
 		t.Skipf("skipping - no cgo, so assuming external linking not available")
 	case runtime.GOOS == "plan9":
 		t.Skipf("skipping - external linking not supported")

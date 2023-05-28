@@ -5,59 +5,37 @@
 package main_test
 
 import (
-	"flag"
+	"bytes"
 	"go/format"
-	"internal/diff"
-	"internal/testenv"
+	diffpkg "internal/diff"
 	"os"
-	"strings"
 	"testing"
+
+	"cmd/go/internal/help"
+	"cmd/go/internal/modload"
 )
 
-var fixDocs = flag.Bool("fixdocs", false, "if true, update alldocs.go")
-
 func TestDocsUpToDate(t *testing.T) {
-	testenv.MustHaveGoBuild(t)
-	if !*fixDocs {
-		t.Parallel()
+	t.Parallel()
+
+	if !modload.Enabled() {
+		t.Skipf("help.Help in GOPATH mode is configured by main.main")
 	}
 
-	// We run 'go help documentation' as a subprocess instead of
-	// calling help.Help directly because it may be sensitive to
-	// init-time configuration
-	cmd := testenv.Command(t, testGo, "help", "documentation")
-	// Unset GO111MODULE so that the 'go get' section matches
-	// the default 'go get' implementation.
-	cmd.Env = append(cmd.Environ(), "GO111MODULE=")
-	cmd.Stderr = new(strings.Builder)
-	out, err := cmd.Output()
+	buf := new(bytes.Buffer)
+	// Match the command in mkalldocs.sh that generates alldocs.go.
+	help.Help(buf, []string{"documentation"})
+	internal := buf.Bytes()
+	internal, err := format.Source(internal)
 	if err != nil {
-		t.Fatalf("%v: %v\n%s", cmd, err, cmd.Stderr)
+		t.Fatalf("gofmt docs: %v", err)
 	}
-
-	alldocs, err := format.Source(out)
+	alldocs, err := os.ReadFile("alldocs.go")
 	if err != nil {
-		t.Fatalf("format.Source($(%v)): %v", cmd, err)
+		t.Fatalf("error reading alldocs.go: %v", err)
 	}
-
-	const srcPath = `alldocs.go`
-	old, err := os.ReadFile(srcPath)
-	if err != nil {
-		t.Fatalf("error reading %s: %v", srcPath, err)
-	}
-	diff := diff.Diff(srcPath, old, "go help documentation | gofmt", alldocs)
-	if diff == nil {
-		t.Logf("%s is up to date.", srcPath)
-		return
-	}
-
-	if *fixDocs {
-		if err := os.WriteFile(srcPath, alldocs, 0666); err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("wrote %d bytes to %s", len(alldocs), srcPath)
-	} else {
-		t.Logf("\n%s", diff)
-		t.Errorf("%s is stale. To update, run 'go generate cmd/go'.", srcPath)
+	if !bytes.Equal(internal, alldocs) {
+		t.Errorf("alldocs.go is not up to date; run mkalldocs.sh to regenerate it\n%s",
+			diffpkg.Diff("go help documentation | gofmt", internal, "alldocs.go", alldocs))
 	}
 }

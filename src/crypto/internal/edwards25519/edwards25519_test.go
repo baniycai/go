@@ -7,8 +7,9 @@ package edwards25519
 import (
 	"crypto/internal/edwards25519/field"
 	"encoding/hex"
-	"internal/testenv"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -280,8 +281,9 @@ func TestNonCanonicalPoints(t *testing.T) {
 var testAllocationsSink byte
 
 func TestAllocations(t *testing.T) {
-	testenv.SkipIfOptimizationOff(t)
-
+	if strings.HasSuffix(os.Getenv("GO_BUILDER_NAME"), "-noopt") {
+		t.Skip("skipping allocations test without relevant optimizations")
+	}
 	if allocs := testing.AllocsPerRun(100, func() {
 		p := NewIdentityPoint()
 		p.Add(p, NewGeneratorPoint())
@@ -299,15 +301,4 @@ func decodeHex(s string) []byte {
 		panic(err)
 	}
 	return b
-}
-
-func BenchmarkEncodingDecoding(b *testing.B) {
-	p := new(Point).Set(dalekScalarBasepoint)
-	for i := 0; i < b.N; i++ {
-		buf := p.Bytes()
-		_, err := p.SetBytes(buf)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
 }

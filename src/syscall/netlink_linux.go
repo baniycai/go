@@ -6,10 +6,7 @@
 
 package syscall
 
-import (
-	"sync"
-	"unsafe"
-)
+import "unsafe"
 
 // Round the length of a netlink message up to align it properly.
 func nlmAlignOf(msglen int) int {
@@ -50,15 +47,10 @@ func newNetlinkRouteRequest(proto, seq, family int) []byte {
 	return rr.toWireFormat()
 }
 
-var pageBufPool = &sync.Pool{New: func() any {
-	b := make([]byte, Getpagesize())
-	return &b
-}}
-
 // NetlinkRIB returns routing information base, as known as RIB, which
 // consists of network facility information, states and parameters.
 func NetlinkRIB(proto, family int) ([]byte, error) {
-	s, err := Socket(AF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_ROUTE)
+	s, err := cloexecSocket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE)
 	if err != nil {
 		return nil, err
 	}
@@ -80,12 +72,10 @@ func NetlinkRIB(proto, family int) ([]byte, error) {
 		return nil, EINVAL
 	}
 	var tab []byte
-
-	rbNew := pageBufPool.Get().(*[]byte)
-	defer pageBufPool.Put(rbNew)
+	rbNew := make([]byte, Getpagesize())
 done:
 	for {
-		rb := *rbNew
+		rb := rbNew
 		nr, _, err := Recvfrom(s, rb, 0)
 		if err != nil {
 			return nil, err

@@ -10,9 +10,7 @@ import (
 )
 
 // AIX requires a larger stack for syscalls.
-// The race build also needs more stack. See issue 54291.
-// This arithmetic must match that in cmd/internal/objabi/stack.go:stackGuardMultiplier.
-const StackGuardMultiplier = 1 + goos.IsAix + isRace
+const StackGuardMultiplier = StackGuardMultiplierDefault*(1-goos.IsAix) + 2*goos.IsAix
 
 // DefaultPhysPageSize is the default physical page size.
 const DefaultPhysPageSize = goarch.DefaultPhysPageSize

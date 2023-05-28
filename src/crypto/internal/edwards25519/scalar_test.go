@@ -14,43 +14,34 @@ import (
 	"testing/quick"
 )
 
-var scOneBytes = [32]byte{1}
-var scOne, _ = new(Scalar).SetCanonicalBytes(scOneBytes[:])
-var scMinusOne, _ = new(Scalar).SetCanonicalBytes(scalarMinusOneBytes[:])
-
 // Generate returns a valid (reduced modulo l) Scalar with a distribution
 // weighted towards high, low, and edge values.
 func (Scalar) Generate(rand *mathrand.Rand, size int) reflect.Value {
-	var s [32]byte
+	s := scZero
 	diceRoll := rand.Intn(100)
 	switch {
 	case diceRoll == 0:
 	case diceRoll == 1:
-		s = scOneBytes
+		s = scOne
 	case diceRoll == 2:
-		s = scalarMinusOneBytes
+		s = scMinusOne
 	case diceRoll < 5:
 		// Generate a low scalar in [0, 2^125).
-		rand.Read(s[:16])
-		s[15] &= (1 << 5) - 1
+		rand.Read(s.s[:16])
+		s.s[15] &= (1 << 5) - 1
 	case diceRoll < 10:
 		// Generate a high scalar in [2^252, 2^252 + 2^124).
-		s[31] = 1 << 4
-		rand.Read(s[:16])
-		s[15] &= (1 << 4) - 1
+		s.s[31] = 1 << 4
+		rand.Read(s.s[:16])
+		s.s[15] &= (1 << 4) - 1
 	default:
 		// Generate a valid scalar in [0, l) by returning [0, 2^252) which has a
 		// negligibly different distribution (the former has a 2^-127.6 chance
 		// of being out of the latter range).
-		rand.Read(s[:])
-		s[31] &= (1 << 4) - 1
+		rand.Read(s.s[:])
+		s.s[31] &= (1 << 4) - 1
 	}
-
-	val := Scalar{}
-	fiatScalarFromBytes((*[4]uint64)(&val.s), &s)
-	fiatScalarToMontgomery(&val.s, (*fiatScalarNonMontgomeryDomainFieldElement)(&val.s))
-
-	return reflect.ValueOf(val)
+	return reflect.ValueOf(s)
 }
 
 // quickCheckConfig1024 will make each quickcheck test run (1024 * -quickchecks)
@@ -59,7 +50,7 @@ var quickCheckConfig1024 = &quick.Config{MaxCountScale: 1 << 10}
 
 func TestScalarGenerate(t *testing.T) {
 	f := func(sc Scalar) bool {
-		return isReduced(sc.Bytes())
+		return isReduced(&sc)
 	}
 	if err := quick.Check(f, quickCheckConfig1024); err != nil {
 		t.Errorf("generated unreduced scalar: %v", err)
@@ -73,8 +64,7 @@ func TestScalarSetCanonicalBytes(t *testing.T) {
 		if _, err := sc.SetCanonicalBytes(in[:]); err != nil {
 			return false
 		}
-		repr := sc.Bytes()
-		return bytes.Equal(in[:], repr) && isReduced(repr)
+		return bytes.Equal(in[:], sc.Bytes()) && isReduced(&sc)
 	}
 	if err := quick.Check(f1, quickCheckConfig1024); err != nil {
 		t.Errorf("failed bytes->scalar->bytes round-trip: %v", err)
@@ -90,7 +80,7 @@ func TestScalarSetCanonicalBytes(t *testing.T) {
 		t.Errorf("failed scalar->bytes->scalar round-trip: %v", err)
 	}
 
-	b := scalarMinusOneBytes
+	b := scMinusOne.s
 	b[31] += 1
 	s := scOne
 	if out, err := s.SetCanonicalBytes(b[:]); err == nil {
@@ -107,11 +97,10 @@ func TestScalarSetUniformBytes(t *testing.T) {
 	mod.Add(mod, new(big.Int).Lsh(big.NewInt(1), 252))
 	f := func(in [64]byte, sc Scalar) bool {
 		sc.SetUniformBytes(in[:])
-		repr := sc.Bytes()
-		if !isReduced(repr) {
+		if !isReduced(&sc) {
 			return false
 		}
-		scBig := bigIntFromLittleEndianBytes(repr[:])
+		scBig := bigIntFromLittleEndianBytes(sc.s[:])
 		inBig := bigIntFromLittleEndianBytes(in[:])
 		return inBig.Mod(inBig, mod).Cmp(scBig) == 0
 	}
@@ -170,9 +159,7 @@ func TestScalarMultiplyDistributesOverAdd(t *testing.T) {
 		t3.Multiply(&y, &z)
 		t2.Add(&t2, &t3)
 
-		reprT1, reprT2 := t1.Bytes(), t2.Bytes()
-
-		return t1 == t2 && isReduced(reprT1) && isReduced(reprT2)
+		return t1 == t2 && isReduced(&t1) && isReduced(&t3)
 	}
 
 	if err := quick.Check(multiplyDistributesOverAdd, quickCheckConfig1024); err != nil {
@@ -191,7 +178,7 @@ func TestScalarAddLikeSubNeg(t *testing.T) {
 		t2.Negate(&y)
 		t2.Add(&t2, &x)
 
-		return t1 == t2 && isReduced(t1.Bytes())
+		return t1 == t2 && isReduced(&t1)
 	}
 
 	if err := quick.Check(addLikeSubNeg, quickCheckConfig1024); err != nil {
@@ -200,13 +187,12 @@ func TestScalarAddLikeSubNeg(t *testing.T) {
 }
 
 func TestScalarNonAdjacentForm(t *testing.T) {
-	s, _ := (&Scalar{}).SetCanonicalBytes([]byte{
+	s := Scalar{[32]byte{
 		0x1a, 0x0e, 0x97, 0x8a, 0x90, 0xf6, 0x62, 0x2d,
 		0x37, 0x47, 0x02, 0x3f, 0x8a, 0xd8, 0x26, 0x4d,
 		0xa7, 0x58, 0xaa, 0x1b, 0x88, 0xe0, 0x40, 0xd1,
 		0x58, 0x9e, 0x7b, 0x7f, 0x23, 0x76, 0xef, 0x09,
-	})
-
+	}}
 	expectedNaf := [256]int8{
 		0, 13, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, -9, 0, 0, 0, 0, -11, 0, 0, 0, 0, 3, 0, 0, 0, 0, 1,
 		0, 0, 0, 0, 9, 0, 0, 0, 0, -5, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 11, 0, 0, 0, 0, 11, 0, 0, 0, 0, 0,
@@ -231,19 +217,17 @@ type notZeroScalar Scalar
 
 func (notZeroScalar) Generate(rand *mathrand.Rand, size int) reflect.Value {
 	var s Scalar
-	var isNonZero uint64
-	for isNonZero == 0 {
+	for s == scZero {
 		s = Scalar{}.Generate(rand, size).Interface().(Scalar)
-		fiatScalarNonzero(&isNonZero, (*[4]uint64)(&s.s))
 	}
 	return reflect.ValueOf(notZeroScalar(s))
 }
 
 func TestScalarEqual(t *testing.T) {
-	if scOne.Equal(scMinusOne) == 1 {
+	if scOne.Equal(&scMinusOne) == 1 {
 		t.Errorf("scOne.Equal(&scMinusOne) is true")
 	}
-	if scMinusOne.Equal(scMinusOne) == 0 {
+	if scMinusOne.Equal(&scMinusOne) == 0 {
 		t.Errorf("scMinusOne.Equal(&scMinusOne) is false")
 	}
 }

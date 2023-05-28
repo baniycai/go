@@ -6,12 +6,16 @@
 
 package ecdsa
 
-import "io"
+import (
+	"crypto/cipher"
+	"crypto/elliptic"
+	"math/big"
+)
 
-func verifyAsm(pub *PublicKey, hash []byte, sig []byte) error {
-	return errNoAsm
+func sign(priv *PrivateKey, csprng *cipher.StreamReader, c elliptic.Curve, hash []byte) (r, s *big.Int, err error) {
+	return signGeneric(priv, csprng, c, hash)
 }
 
-func signAsm(priv *PrivateKey, csprng io.Reader, hash []byte) (sig []byte, err error) {
-	return nil, errNoAsm
+func verify(pub *PublicKey, c elliptic.Curve, hash []byte, r, s *big.Int) bool {
+	return verifyGeneric(pub, c, hash, r, s)
 }

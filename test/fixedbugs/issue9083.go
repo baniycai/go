@@ -13,7 +13,6 @@ const zero = 0
 
 func main() {
 	var x int
-	_ = x
 	x = make(map[int]int)       // ERROR "cannot use make\(map\[int\]int\)|incompatible"
 	x = make(map[int]int, 0)    // ERROR "cannot use make\(map\[int\]int, 0\)|incompatible"
 	x = make(map[int]int, zero) // ERROR "cannot use make\(map\[int\]int, zero\)|incompatible"

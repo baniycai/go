@@ -4,27 +4,20 @@
 
 // This file implements a typechecker test harness. The packages specified
 // in tests are typechecked. Error messages reported by the typechecker are
-// compared against the errors expected in the test files.
+// compared against the error messages expected in the test files.
 //
-// Expected errors are indicated in the test files by putting comments
-// of the form /* ERROR pattern */ or /* ERRORx pattern */ (or a similar
-// //-style line comment) immediately following the tokens where errors
-// are reported. There must be exactly one blank before and after the
-// ERROR/ERRORx indicator, and the pattern must be a properly quoted Go
-// string.
+// Expected errors are indicated in the test files by putting a comment
+// of the form /* ERROR "rx" */ immediately following an offending token.
+// The harness will verify that an error matching the regular expression
+// rx is reported at that source position. Consecutive comments may be
+// used to indicate multiple errors for the same token position.
 //
-// The harness will verify that each ERROR pattern is a substring of the
-// error reported at that source position, and that each ERRORx pattern
-// is a regular expression matching the respective error.
-// Consecutive comments may be used to indicate multiple errors reported
-// at the same position.
-//
-// For instance, the following test source indicates that an "undeclared"
+// For instance, the following test file indicates that a "not declared"
 // error should be reported for the undeclared variable x:
 //
 //	package p
 //	func f() {
-//		_ = x /* ERROR "undeclared" */ + 1
+//		_ = x /* ERROR "not declared" */ + 1
 //	}
 
 package types2_test
@@ -37,9 +30,8 @@ import (
 	"internal/testenv"
 	"os"
 	"path/filepath"
-	"reflect"
 	"regexp"
-	"strconv"
+	"sort"
 	"strings"
 	"testing"
 
@@ -49,16 +41,15 @@ import (
 var (
 	haltOnError  = flag.Bool("halt", false, "halt on error")
 	verifyErrors = flag.Bool("verify", false, "verify errors (rather than list them) in TestManual")
+	goVersion    = flag.String("lang", "", "Go language version (e.g. \"go1.12\")")
 )
 
-func parseFiles(t *testing.T, filenames []string, srcs [][]byte, mode syntax.Mode) ([]*syntax.File, []error) {
+func parseFiles(t *testing.T, filenames []string, mode syntax.Mode) ([]*syntax.File, []error) {
 	var files []*syntax.File
 	var errlist []error
 	errh := func(err error) { errlist = append(errlist, err) }
-	for i, filename := range filenames {
-		base := syntax.NewFileBase(filename)
-		r := bytes.NewReader(srcs[i])
-		file, err := syntax.Parse(base, r, errh, nil, mode)
+	for _, filename := range filenames {
+		file, err := syntax.ParseFile(filename, errh, nil, mode)
 		if file == nil {
 			t.Fatalf("%s: %s", filename, err)
 		}
@@ -67,29 +58,53 @@ func parseFiles(t *testing.T, filenames []string, srcs [][]byte, mode syntax.Mod
 	return files, errlist
 }
 
-func unpackError(err error) (syntax.Pos, string) {
+func unpackError(err error) syntax.Error {
 	switch err := err.(type) {
 	case syntax.Error:
-		return err.Pos, err.Msg
+		return err
 	case Error:
-		return err.Pos, err.Msg
+		return syntax.Error{Pos: err.Pos, Msg: err.Msg}
 	default:
-		return nopos, err.Error()
+		return syntax.Error{Msg: err.Error()}
 	}
 }
 
-// absDiff returns the absolute difference between x and y.
-func absDiff(x, y uint) uint {
-	if x < y {
+// delta returns the absolute difference between x and y.
+func delta(x, y uint) uint {
+	switch {
+	case x < y:
 		return y - x
+	case x > y:
+		return x - y
+	default:
+		return 0
 	}
-	return x - y
 }
 
-// parseFlags parses flags from the first line of the given source if the line
-// starts with "//" (line comment) followed by "-" (possibly with spaces
-// between). Otherwise the line is ignored.
-func parseFlags(src []byte, flags *flag.FlagSet) error {
+// Note: parseFlags is identical to the version in go/types which is
+//       why it has a src argument even though here it is always nil.
+
+// parseFlags parses flags from the first line of the given source
+// (from src if present, or by reading from the file) if the line
+// starts with "//" (line comment) followed by "-" (possiby with
+// spaces between). Otherwise the line is ignored.
+func parseFlags(filename string, src []byte, flags *flag.FlagSet) error {
+	// If there is no src, read from the file.
+	const maxLen = 256
+	if len(src) == 0 {
+		f, err := os.Open(filename)
+		if err != nil {
+			return err
+		}
+
+		var buf [maxLen]byte
+		n, err := f.Read(buf[:])
+		if err != nil {
+			return err
+		}
+		src = buf[:n]
+	}
+
 	// we must have a line comment that starts with a "-"
 	const prefix = "//"
 	if !bytes.HasPrefix(src, []byte(prefix)) {
@@ -100,7 +115,6 @@ func parseFlags(src []byte, flags *flag.FlagSet) error {
 		return nil // comment doesn't start with a "-"
 	}
 	end := bytes.Index(src, []byte("\n"))
-	const maxLen = 256
 	if end < 0 || end > maxLen {
 		return fmt.Errorf("flags comment line too long")
 	}
@@ -108,16 +122,7 @@ func parseFlags(src []byte, flags *flag.FlagSet) error {
 	return flags.Parse(strings.Fields(string(src[:end])))
 }
 
-// testFiles type-checks the package consisting of the given files, and
-// compares the resulting errors with the ERROR annotations in the source.
-//
-// The srcs slice contains the file content for the files named in the
-// filenames slice. The colDelta parameter specifies the tolerance for position
-// mismatch when comparing errors. The manual parameter specifies whether this
-// is a 'manual' test.
-//
-// If provided, opts may be used to mutate the Config before type-checking.
-func testFiles(t *testing.T, filenames []string, srcs [][]byte, colDelta uint, manual bool, opts ...func(*Config)) {
+func testFiles(t *testing.T, filenames []string, colDelta uint, manual bool) {
 	if len(filenames) == 0 {
 		t.Fatal("no source files")
 	}
@@ -126,11 +131,11 @@ func testFiles(t *testing.T, filenames []string, srcs [][]byte, colDelta uint, m
 	flags := flag.NewFlagSet("", flag.PanicOnError)
 	flags.StringVar(&conf.GoVersion, "lang", "", "")
 	flags.BoolVar(&conf.FakeImportC, "fakeImportC", false, "")
-	if err := parseFlags(srcs[0], flags); err != nil {
+	if err := parseFlags(filenames[0], nil, flags); err != nil {
 		t.Fatal(err)
 	}
 
-	files, errlist := parseFiles(t, filenames, srcs, 0)
+	files, errlist := parseFiles(t, filenames, 0)
 
 	pkgName := "<no package>"
 	if len(files) > 0 {
@@ -158,98 +163,78 @@ func testFiles(t *testing.T, filenames []string, srcs [][]byte, colDelta uint, m
 		}
 		errlist = append(errlist, err)
 	}
-
-	for _, opt := range opts {
-		opt(&conf)
-	}
-
 	conf.Check(pkgName, files, nil)
 
 	if listErrors {
 		return
 	}
 
+	// sort errlist in source order
+	sort.Slice(errlist, func(i, j int) bool {
+		pi := unpackError(errlist[i]).Pos
+		pj := unpackError(errlist[j]).Pos
+		return pi.Cmp(pj) < 0
+	})
+
 	// collect expected errors
 	errmap := make(map[string]map[uint][]syntax.Error)
-	for i, filename := range filenames {
-		if m := syntax.CommentMap(bytes.NewReader(srcs[i]), regexp.MustCompile("^ ERRORx? ")); len(m) > 0 {
+	for _, filename := range filenames {
+		f, err := os.Open(filename)
+		if err != nil {
+			t.Error(err)
+			continue
+		}
+		if m := syntax.ErrorMap(f); len(m) > 0 {
 			errmap[filename] = m
 		}
+		f.Close()
 	}
 
 	// match against found errors
-	var indices []int // list indices of matching errors, reused for each error
 	for _, err := range errlist {
-		gotPos, gotMsg := unpackError(err)
+		got := unpackError(err)
 
 		// find list of errors for the respective error line
-		filename := gotPos.Base().Filename()
+		filename := got.Pos.Base().Filename()
 		filemap := errmap[filename]
-		line := gotPos.Line()
-		var errList []syntax.Error
+		line := got.Pos.Line()
+		var list []syntax.Error
 		if filemap != nil {
-			errList = filemap[line]
+			list = filemap[line]
 		}
+		// list may be nil
 
-		// At least one of the errors in errList should match the current error.
-		indices = indices[:0]
-		for i, want := range errList {
-			pattern, substr := strings.CutPrefix(want.Msg, " ERROR ")
-			if !substr {
-				var found bool
-				pattern, found = strings.CutPrefix(want.Msg, " ERRORx ")
-				if !found {
-					panic("unreachable")
-				}
-			}
-			pattern, err := strconv.Unquote(strings.TrimSpace(pattern))
+		// one of errors in list should match the current error
+		index := -1 // list index of matching message, if any
+		for i, want := range list {
+			rx, err := regexp.Compile(want.Msg)
 			if err != nil {
 				t.Errorf("%s:%d:%d: %v", filename, line, want.Pos.Col(), err)
 				continue
 			}
-			if substr {
-				if !strings.Contains(gotMsg, pattern) {
-					continue
-				}
-			} else {
-				rx, err := regexp.Compile(pattern)
-				if err != nil {
-					t.Errorf("%s:%d:%d: %v", filename, line, want.Pos.Col(), err)
-					continue
-				}
-				if !rx.MatchString(gotMsg) {
-					continue
-				}
+			if rx.MatchString(got.Msg) {
+				index = i
+				break
 			}
-			indices = append(indices, i)
 		}
-		if len(indices) == 0 {
-			t.Errorf("%s: no error expected: %q", gotPos, gotMsg)
+		if index < 0 {
+			t.Errorf("%s: no error expected: %q", got.Pos, got.Msg)
 			continue
 		}
-		// len(indices) > 0
 
-		// If there are multiple matching errors, select the one with the closest column position.
-		index := -1 // index of matching error
-		var delta uint
-		for _, i := range indices {
-			if d := absDiff(gotPos.Col(), errList[i].Pos.Col()); index < 0 || d < delta {
-				index, delta = i, d
-			}
+		// column position must be within expected colDelta
+		want := list[index]
+		if delta(got.Pos.Col(), want.Pos.Col()) > colDelta {
+			t.Errorf("%s: got col = %d; want %d", got.Pos, got.Pos.Col(), want.Pos.Col())
 		}
 
-		// The closest column position must be within expected colDelta.
-		if delta > colDelta {
-			t.Errorf("%s: got col = %d; want %d", gotPos, gotPos.Col(), errList[index].Pos.Col())
-		}
-
-		// eliminate from errList
-		if n := len(errList) - 1; n > 0 {
+		// eliminate from list
+		if n := len(list) - 1; n > 0 {
 			// not the last entry - slide entries down (don't reorder)
-			copy(errList[index:], errList[index+1:])
-			filemap[line] = errList[:n]
+			copy(list[index:], list[index+1:])
+			filemap[line] = list[:n]
 		} else {
-			// last entry - remove errList from filemap
+			// last entry - remove list from filemap
 			delete(filemap, line)
 		}
 
@@ -263,20 +248,13 @@ func testFiles(t *testing.T, filenames []string, srcs [][]byte, colDelta uint, m
 	if len(errmap) > 0 {
 		t.Errorf("--- %s: unreported errors:", pkgName)
 		for filename, filemap := range errmap {
-			for line, errList := range filemap {
-				for _, err := range errList {
+			for line, list := range filemap {
+				for _, err := range list {
 					t.Errorf("%s:%d:%d: %s", filename, line, err.Pos.Col(), err.Msg)
 				}
 			}
 		}
 	}
-}
-
-// boolFieldAddr(conf, name) returns the address of the boolean field conf.<name>.
-// For accessing unexported fields.
-func boolFieldAddr(conf *Config, name string) *bool {
-	v := reflect.Indirect(reflect.ValueOf(conf))
-	return (*bool)(v.FieldByName(name).Addr().UnsafePointer())
 }
 
 // TestManual is for manual testing of a package - either provided
@@ -313,24 +291,16 @@ func TestManual(t *testing.T) {
 		}
 		testDir(t, filenames[0], 0, true)
 	} else {
-		testPkg(t, filenames, 0, true)
+		testFiles(t, filenames, 0, true)
 	}
 }
 
 // TODO(gri) go/types has extra TestLongConstants and TestIndexRepresentability tests
 
-func TestCheck(t *testing.T) {
-	DefPredeclaredTestFuncs()
-	testDirFiles(t, "../../../../internal/types/testdata/check", 50, false) // TODO(gri) narrow column tolerance
-}
-func TestSpec(t *testing.T) { testDirFiles(t, "../../../../internal/types/testdata/spec", 0, false) }
-func TestExamples(t *testing.T) {
-	testDirFiles(t, "../../../../internal/types/testdata/examples", 125, false)
-} // TODO(gri) narrow column tolerance
-func TestFixedbugs(t *testing.T) {
-	testDirFiles(t, "../../../../internal/types/testdata/fixedbugs", 100, false)
-}                            // TODO(gri) narrow column tolerance
-func TestLocal(t *testing.T) { testDirFiles(t, "testdata/local", 0, false) }
+func TestCheck(t *testing.T)     { DefPredeclaredTestFuncs(); testDirFiles(t, "testdata/check", 55, false) } // TODO(gri) narrow column tolerance
+func TestSpec(t *testing.T)      { testDirFiles(t, "testdata/spec", 0, false) }
+func TestExamples(t *testing.T)  { testDirFiles(t, "testdata/examples", 0, false) }
+func TestFixedbugs(t *testing.T) { testDirFiles(t, "testdata/fixedbugs", 0, false) }
 
 func testDirFiles(t *testing.T, dir string, colDelta uint, manual bool) {
 	testenv.MustHaveGoBuild(t)
@@ -350,7 +320,7 @@ func testDirFiles(t *testing.T, dir string, colDelta uint, manual bool) {
 			testDir(t, path, colDelta, manual)
 		} else {
 			t.Run(filepath.Base(path), func(t *testing.T) {
-				testPkg(t, []string{path}, colDelta, manual)
+				testFiles(t, []string{path}, colDelta, manual)
 			})
 		}
 	}
@@ -369,18 +339,6 @@ func testDir(t *testing.T, dir string, colDelta uint, manual bool) {
 	}
 
 	t.Run(filepath.Base(dir), func(t *testing.T) {
-		testPkg(t, filenames, colDelta, manual)
+		testFiles(t, filenames, colDelta, manual)
 	})
-}
-
-func testPkg(t *testing.T, filenames []string, colDelta uint, manual bool) {
-	srcs := make([][]byte, len(filenames))
-	for i, filename := range filenames {
-		src, err := os.ReadFile(filename)
-		if err != nil {
-			t.Fatalf("could not read %s: %v", filename, err)
-		}
-		srcs[i] = src
-	}
-	testFiles(t, filenames, srcs, colDelta, manual)
 }

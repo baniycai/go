@@ -99,10 +99,6 @@ func (z *Float) GobDecode(buf []byte) error {
 		z.SetPrec(uint(oldPrec))
 	}
 
-	if msg := z.validate0(); msg != "" {
-		return errors.New("Float.GobDecode: " + msg)
-	}
-
 	return nil
 }
 

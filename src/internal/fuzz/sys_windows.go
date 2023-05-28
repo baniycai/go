@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"reflect"
 	"syscall"
 	"unsafe"
 )
@@ -50,7 +51,11 @@ func sharedMemMapFile(f *os.File, size int, removeOnClose bool) (mem *sharedMem,
 		return nil, err
 	}
 
-	region := unsafe.Slice((*byte)(unsafe.Pointer(addr)), size)
+	var region []byte
+	header := (*reflect.SliceHeader)(unsafe.Pointer(&region))
+	header.Data = addr
+	header.Len = size
+	header.Cap = size
 	return &sharedMem{
 		f:             f,
 		region:        region,

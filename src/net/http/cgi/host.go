@@ -39,7 +39,7 @@ var osDefaultInheritEnv = func() []string {
 	switch runtime.GOOS {
 	case "darwin", "ios":
 		return []string{"DYLD_LIBRARY_PATH"}
-	case "android", "linux", "freebsd", "netbsd", "openbsd":
+	case "linux", "freebsd", "netbsd", "openbsd":
 		return []string{"LD_LIBRARY_PATH"}
 	case "hpux":
 		return []string{"LD_LIBRARY_PATH", "SHLIB_PATH"}
@@ -138,6 +138,7 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 	env := []string{
 		"SERVER_SOFTWARE=go",
+		"SERVER_NAME=" + req.Host,
 		"SERVER_PROTOCOL=HTTP/1.1",
 		"HTTP_HOST=" + req.Host,
 		"GATEWAY_INTERFACE=CGI/1.1",
@@ -155,12 +156,6 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	} else {
 		// could not parse ip:port, let's use whole RemoteAddr and leave REMOTE_PORT undefined
 		env = append(env, "REMOTE_ADDR="+req.RemoteAddr, "REMOTE_HOST="+req.RemoteAddr)
-	}
-
-	if hostDomain, _, err := net.SplitHostPort(req.Host); err == nil {
-		env = append(env, "SERVER_NAME="+hostDomain)
-	} else {
-		env = append(env, "SERVER_NAME="+req.Host)
 	}
 
 	if req.TLS != nil {

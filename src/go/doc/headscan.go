@@ -16,6 +16,7 @@ By default, the $GOROOT/src directory is scanned.
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"go/doc"
@@ -45,7 +46,7 @@ func isGoFile(fi fs.FileInfo) bool {
 }
 
 func appendHeadings(list []string, comment string) []string {
-	var buf strings.Builder
+	var buf bytes.Buffer
 	doc.ToHTML(&buf, comment, nil)
 	for s := buf.String(); s != ""; {
 		loc := html_h.FindStringIndex(s)

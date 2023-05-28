@@ -10,7 +10,6 @@ import (
 	"go/token"
 	"io"
 	. "reflect"
-	"strings"
 	"testing"
 	"unsafe"
 )
@@ -142,7 +141,7 @@ func TestImplicitSendConversion(t *testing.T) {
 func TestImplicitCallConversion(t *testing.T) {
 	// Arguments must be assignable to parameter types.
 	fv := ValueOf(io.WriteString)
-	b := new(strings.Builder)
+	b := new(bytes.Buffer)
 	fv.Call([]Value{ValueOf(b), ValueOf("hello world")})
 	if b.String() != "hello world" {
 		t.Errorf("After call: string=%q want %q", b.String(), "hello world")

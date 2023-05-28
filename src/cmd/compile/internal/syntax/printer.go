@@ -7,6 +7,7 @@
 package syntax
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"strings"
@@ -46,7 +47,7 @@ func Fprint(w io.Writer, x Node, form Form) (n int, err error) {
 // String is a convenience function that prints n in ShortForm
 // and returns the printed string.
 func String(n Node) string {
-	var buf strings.Builder
+	var buf bytes.Buffer
 	_, err := Fprint(&buf, n, ShortForm)
 	if err != nil {
 		fmt.Fprintf(&buf, "<<< ERROR: %s", err)

@@ -9,7 +9,6 @@ import (
 	"errors"
 	"io"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1106,13 +1105,13 @@ func TestCVE202228131(t *testing.T) {
 	err := Unmarshal(bytes.Repeat([]byte("<a>"), maxUnmarshalDepth+1), &n)
 	if err == nil {
 		t.Fatal("Unmarshal did not fail")
-	} else if !errors.Is(err, errUnmarshalDepth) {
-		t.Fatalf("Unmarshal unexpected error: got %q, want %q", err, errUnmarshalDepth)
+	} else if !errors.Is(err, errExeceededMaxUnmarshalDepth) {
+		t.Fatalf("Unmarshal unexpected error: got %q, want %q", err, errExeceededMaxUnmarshalDepth)
 	}
 }
 
 func TestCVE202230633(t *testing.T) {
-	if testing.Short() || runtime.GOARCH == "wasm" {
+	if testing.Short() {
 		t.Skip("test requires significant memory")
 	}
 	defer func() {

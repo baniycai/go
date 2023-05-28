@@ -137,10 +137,11 @@ func (curve *nistCurve[Point]) IsOnCurve(x, y *big.Int) bool {
 }
 
 func (curve *nistCurve[Point]) pointFromAffine(x, y *big.Int) (p Point, err error) {
+	p = curve.newPoint()
 	// (0, 0) is by convention the point at infinity, which can't be represented
 	// in affine coordinates. See Issue 37294.
 	if x.Sign() == 0 && y.Sign() == 0 {
-		return curve.newPoint(), nil
+		return p, nil
 	}
 	// Reject values that would not get correctly encoded.
 	if x.Sign() < 0 || y.Sign() < 0 {
@@ -155,7 +156,7 @@ func (curve *nistCurve[Point]) pointFromAffine(x, y *big.Int) (p Point, err erro
 	buf[0] = 4 // uncompressed point
 	x.FillBytes(buf[1 : 1+byteLen])
 	y.FillBytes(buf[1+byteLen : 1+2*byteLen])
-	return curve.newPoint().SetBytes(buf)
+	return p.SetBytes(buf)
 }
 
 func (curve *nistCurve[Point]) pointToAffine(p Point) (x, y *big.Int) {

@@ -9,7 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"internal/testenv"
-	"os"
+	"io/ioutil"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -112,21 +112,21 @@ func TestStdLib(t *testing.T) {
 }
 
 func walkDirs(t *testing.T, dir string, action func(string)) {
-	entries, err := os.ReadDir(dir)
+	fis, err := ioutil.ReadDir(dir)
 	if err != nil {
 		t.Error(err)
 		return
 	}
 
 	var files, dirs []string
-	for _, entry := range entries {
-		if entry.Type().IsRegular() {
-			if strings.HasSuffix(entry.Name(), ".go") {
-				path := filepath.Join(dir, entry.Name())
+	for _, fi := range fis {
+		if fi.Mode().IsRegular() {
+			if strings.HasSuffix(fi.Name(), ".go") {
+				path := filepath.Join(dir, fi.Name())
 				files = append(files, path)
 			}
-		} else if entry.IsDir() && entry.Name() != "testdata" {
-			path := filepath.Join(dir, entry.Name())
+		} else if fi.IsDir() && fi.Name() != "testdata" {
+			path := filepath.Join(dir, fi.Name())
 			if !strings.HasSuffix(path, string(filepath.Separator)+"test") {
 				dirs = append(dirs, path)
 			}

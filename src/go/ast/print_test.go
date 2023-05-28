@@ -5,6 +5,7 @@
 package ast
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -83,7 +84,7 @@ func trim(s string) string {
 }
 
 func TestPrint(t *testing.T) {
-	var buf strings.Builder
+	var buf bytes.Buffer
 	for _, test := range tests {
 		buf.Reset()
 		if err := Fprint(&buf, nil, test.x, nil); err != nil {

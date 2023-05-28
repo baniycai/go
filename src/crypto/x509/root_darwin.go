@@ -7,7 +7,6 @@ package x509
 import (
 	macOS "crypto/x509/internal/macos"
 	"errors"
-	"fmt"
 )
 
 func (c *Certificate) systemVerify(opts *VerifyOptions) (chains [][]*Certificate, err error) {
@@ -25,19 +24,15 @@ func (c *Certificate) systemVerify(opts *VerifyOptions) (chains [][]*Certificate
 				return nil, err
 			}
 			sc, err := macOS.SecCertificateCreateWithData(c.Raw)
-			if err != nil {
-				return nil, err
+			if err == nil {
+				macOS.CFArrayAppendValue(certs, sc)
 			}
-			macOS.CFArrayAppendValue(certs, sc)
 		}
 	}
 
 	policies := macOS.CFArrayCreateMutable()
 	defer macOS.ReleaseCFArray(policies)
-	sslPolicy, err := macOS.SecPolicyCreateSSL(opts.DNSName)
-	if err != nil {
-		return nil, err
-	}
+	sslPolicy := macOS.SecPolicyCreateSSL(opts.DNSName)
 	macOS.CFArrayAppendValue(policies, sslPolicy)
 
 	trustObj, err := macOS.SecTrustCreateWithCertificates(certs, policies)
@@ -59,26 +54,14 @@ func (c *Certificate) systemVerify(opts *VerifyOptions) (chains [][]*Certificate
 	// always enforce its SCT requirements, and there are still _some_ people
 	// using TLS or OCSP for that.
 
-	if ret, err := macOS.SecTrustEvaluateWithError(trustObj); err != nil {
-		switch ret {
-		case macOS.ErrSecCertificateExpired:
-			return nil, CertificateInvalidError{c, Expired, err.Error()}
-		case macOS.ErrSecHostNameMismatch:
-			return nil, HostnameError{c, opts.DNSName}
-		case macOS.ErrSecNotTrusted:
-			return nil, UnknownAuthorityError{Cert: c}
-		default:
-			return nil, fmt.Errorf("x509: %s", err)
-		}
+	if err := macOS.SecTrustEvaluateWithError(trustObj); err != nil {
+		return nil, err
 	}
 
 	chain := [][]*Certificate{{}}
 	numCerts := macOS.SecTrustGetCertificateCount(trustObj)
 	for i := 0; i < numCerts; i++ {
-		certRef, err := macOS.SecTrustGetCertificateAtIndex(trustObj, i)
-		if err != nil {
-			return nil, err
-		}
+		certRef := macOS.SecTrustGetCertificateAtIndex(trustObj, i)
 		cert, err := exportCertificate(certRef)
 		if err != nil {
 			return nil, err

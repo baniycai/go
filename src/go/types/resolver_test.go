@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/importer"
+	"go/parser"
 	"go/token"
 	"internal/testenv"
 	"sort"
@@ -119,8 +120,12 @@ func TestResolveIdents(t *testing.T) {
 	// parse package files
 	fset := token.NewFileSet()
 	var files []*ast.File
-	for _, src := range sources {
-		files = append(files, mustParse(fset, src))
+	for i, src := range sources {
+		f, err := parser.ParseFile(fset, fmt.Sprintf("sources[%d]", i), src, parser.DeclarationErrors)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, f)
 	}
 
 	// resolve and type-check package AST
@@ -156,7 +161,7 @@ func TestResolveIdents(t *testing.T) {
 					}
 					return false
 				}
-				return true
+				return false
 			}
 			return true
 		})

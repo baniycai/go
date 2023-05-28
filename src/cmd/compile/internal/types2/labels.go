@@ -6,7 +6,6 @@ package types2
 
 import (
 	"cmd/compile/internal/syntax"
-	. "internal/types/errors"
 )
 
 // labels checks correct label use in body.
@@ -22,24 +21,21 @@ func (check *Checker) labels(body *syntax.BlockStmt) {
 	// for the respective gotos.
 	for _, jmp := range fwdJumps {
 		var msg string
-		var code Code
 		name := jmp.Label.Value
 		if alt := all.Lookup(name); alt != nil {
 			msg = "goto %s jumps into block"
 			alt.(*Label).used = true // avoid another error
-			code = JumpIntoBlock
 		} else {
 			msg = "label %s not declared"
-			code = UndeclaredLabel
 		}
-		check.errorf(jmp.Label, code, msg, name)
+		check.errorf(jmp.Label, msg, name)
 	}
 
 	// spec: "It is illegal to define a label that is never used."
 	for name, obj := range all.elems {
 		obj = resolve(name, obj)
 		if lbl := obj.(*Label); !lbl.used {
-			check.softErrorf(lbl.pos, UnusedLabel, "label %s declared and not used", lbl.name)
+			check.softErrorf(lbl.pos, "label %s declared but not used", lbl.name)
 		}
 	}
 }
@@ -134,7 +130,6 @@ func (check *Checker) blockBranches(all *Scope, parent *block, lstmt *syntax.Lab
 				lbl := NewLabel(s.Label.Pos(), check.pkg, name)
 				if alt := all.Insert(lbl); alt != nil {
 					var err error_
-					err.code = DuplicateLabel
 					err.soft = true
 					err.errorf(lbl.pos, "label %s already declared", name)
 					err.recordAltDecl(alt)
@@ -154,7 +149,6 @@ func (check *Checker) blockBranches(all *Scope, parent *block, lstmt *syntax.Lab
 						if jumpsOverVarDecl(jmp) {
 							check.softErrorf(
 								jmp.Label,
-								JumpOverDecl,
 								"goto %s jumps over variable declaration at line %d",
 								name,
 								varDeclPos.Line(),
@@ -192,7 +186,7 @@ func (check *Checker) blockBranches(all *Scope, parent *block, lstmt *syntax.Lab
 					}
 				}
 				if !valid {
-					check.errorf(s.Label, MisplacedLabel, "invalid break label %s", name)
+					check.errorf(s.Label, "invalid break label %s", name)
 					return
 				}
 
@@ -207,7 +201,7 @@ func (check *Checker) blockBranches(all *Scope, parent *block, lstmt *syntax.Lab
 					}
 				}
 				if !valid {
-					check.errorf(s.Label, MisplacedLabel, "invalid continue label %s", name)
+					check.errorf(s.Label, "invalid continue label %s", name)
 					return
 				}
 
@@ -219,7 +213,7 @@ func (check *Checker) blockBranches(all *Scope, parent *block, lstmt *syntax.Lab
 				}
 
 			default:
-				check.errorf(s, InvalidSyntaxTree, "branch statement: %s %s", s.Tok, name)
+				check.errorf(s, invalidAST+"branch statement: %s %s", s.Tok, name)
 				return
 			}
 

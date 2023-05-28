@@ -210,7 +210,11 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		return true
 	}
 	// Handle references to ELF symbols from our own object files.
-	return targType != sym.SDYNIMPORT
+	if targType != sym.SDYNIMPORT {
+		return true
+	}
+
+	return false
 }
 
 func elfreloc1(ctxt *ld.Link, out *ld.OutBuf, ldr *loader.Loader, s loader.Sym, r loader.ExtReloc, ri int, sectoff int64) bool {

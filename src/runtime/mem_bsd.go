@@ -23,20 +23,13 @@ func sysAllocOS(n uintptr) unsafe.Pointer {
 }
 
 func sysUnusedOS(v unsafe.Pointer, n uintptr) {
-	if debug.madvdontneed != 0 {
-		madvise(v, n, _MADV_DONTNEED)
-	} else {
-		madvise(v, n, _MADV_FREE)
-	}
+	madvise(v, n, _MADV_FREE)
 }
 
 func sysUsedOS(v unsafe.Pointer, n uintptr) {
 }
 
 func sysHugePageOS(v unsafe.Pointer, n uintptr) {
-}
-
-func sysNoHugePageOS(v unsafe.Pointer, n uintptr) {
 }
 
 // Don't split the stack as this function may be invoked without a valid G,

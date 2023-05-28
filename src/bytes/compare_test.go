@@ -6,7 +6,6 @@ package bytes_test
 
 import (
 	. "bytes"
-	"fmt"
 	"internal/testenv"
 	"testing"
 )
@@ -214,28 +213,20 @@ func BenchmarkCompareBytesDifferentLength(b *testing.B) {
 	}
 }
 
-func benchmarkCompareBytesBigUnaligned(b *testing.B, offset int) {
+func BenchmarkCompareBytesBigUnaligned(b *testing.B) {
 	b.StopTimer()
 	b1 := make([]byte, 0, 1<<20)
 	for len(b1) < 1<<20 {
 		b1 = append(b1, "Hello Gophers!"...)
 	}
-	b2 := append([]byte("12345678")[:offset], b1...)
+	b2 := append([]byte("hello"), b1...)
 	b.StartTimer()
-	for j := 0; j < b.N; j++ {
-		if Compare(b1, b2[offset:]) != 0 {
+	for i := 0; i < b.N; i++ {
+		if Compare(b1, b2[len("hello"):]) != 0 {
 			b.Fatal("b1 != b2")
 		}
 	}
 	b.SetBytes(int64(len(b1)))
-}
-
-func BenchmarkCompareBytesBigUnaligned(b *testing.B) {
-	for i := 1; i < 8; i++ {
-		b.Run(fmt.Sprintf("offset=%d", i), func(b *testing.B) {
-			benchmarkCompareBytesBigUnaligned(b, i)
-		})
-	}
 }
 
 func BenchmarkCompareBytesBig(b *testing.B) {

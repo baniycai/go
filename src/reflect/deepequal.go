@@ -39,10 +39,10 @@ func deepValueEqual(v1, v2 Value, visited map[visit]bool) bool {
 	hard := func(v1, v2 Value) bool {
 		switch v1.Kind() {
 		case Pointer:
-			if v1.typ().PtrBytes == 0 {
-				// not-in-heap pointers can't be cyclic.
-				// At least, all of our current uses of runtime/internal/sys.NotInHeap
-				// have that property. The runtime ones aren't cyclic (and we don't use
+			if v1.typ.ptrdata == 0 {
+				// go:notinheap pointers can't be cyclic.
+				// At least, all of our current uses of go:notinheap have
+				// that property. The runtime ones aren't cyclic (and we don't use
 				// DeepEqual on them anyway), and the cgo-generated ones are
 				// all empty structs.
 				return false

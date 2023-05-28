@@ -5,6 +5,7 @@
 package os
 
 import (
+	"internal/oserror"
 	"internal/poll"
 	"io/fs"
 )
@@ -27,6 +28,7 @@ var (
 	ErrDeadlineExceeded = errDeadlineExceeded() // "i/o timeout"
 )
 
+func errClosed() error     { return oserror.ErrClosed }
 func errNoDeadline() error { return poll.ErrNoDeadline }
 
 // errDeadlineExceeded returns the value for os.ErrDeadlineExceeded.

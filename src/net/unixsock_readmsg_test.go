@@ -7,7 +7,6 @@
 package net
 
 import (
-	"internal/syscall/unix"
 	"os"
 	"syscall"
 	"testing"
@@ -95,7 +94,7 @@ func TestUnixConnReadMsgUnixSCMRightsCloseOnExec(t *testing.T) {
 		}
 	}()
 
-	flags, err := unix.Fcntl(gotFDs[0], syscall.F_GETFD, 0)
+	flags, err := fcntl(gotFDs[0], syscall.F_GETFD, 0)
 	if err != nil {
 		t.Fatalf("Can't get flags of fd:%#v, with err:%v", gotFDs[0], err)
 	}

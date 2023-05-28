@@ -67,26 +67,26 @@ func (v *Int) Set(value int64) {
 
 // Float is a 64-bit float variable that satisfies the Var interface.
 type Float struct {
-	f atomic.Uint64
+	f uint64
 }
 
 func (v *Float) Value() float64 {
-	return math.Float64frombits(v.f.Load())
+	return math.Float64frombits(atomic.LoadUint64(&v.f))
 }
 
 func (v *Float) String() string {
 	return strconv.FormatFloat(
-		math.Float64frombits(v.f.Load()), 'g', -1, 64)
+		math.Float64frombits(atomic.LoadUint64(&v.f)), 'g', -1, 64)
 }
 
 // Add adds delta to v.
 func (v *Float) Add(delta float64) {
 	for {
-		cur := v.f.Load()
+		cur := atomic.LoadUint64(&v.f)
 		curVal := math.Float64frombits(cur)
 		nxtVal := curVal + delta
 		nxt := math.Float64bits(nxtVal)
-		if v.f.CompareAndSwap(cur, nxt) {
+		if atomic.CompareAndSwapUint64(&v.f, cur, nxt) {
 			return
 		}
 	}
@@ -94,7 +94,7 @@ func (v *Float) Add(delta float64) {
 
 // Set sets v to value.
 func (v *Float) Set(value float64) {
-	v.f.Store(math.Float64bits(value))
+	atomic.StoreUint64(&v.f, math.Float64bits(value))
 }
 
 // Map is a string-to-Var map variable that satisfies the Var interface.

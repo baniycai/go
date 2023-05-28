@@ -33,8 +33,5 @@ TEXT asmtest(SB),DUPOK|NOSPLIT,$0
 	PUSHL FS // 0fa0
 	POPL FS  // 0fa1
 	POPL SS  // 17
-
-	RDPID AX                                // f30fc7f8
-
 	// End of tests.
 	RET

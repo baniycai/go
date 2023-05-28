@@ -107,7 +107,10 @@ func TestInstantiateEquality(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		pkg := mustTypecheck(test.src, nil, nil)
+		pkg, err := pkgFor(".", test.src, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
 
 		t.Run(pkg.Name(), func(t *testing.T) {
 			ctxt := NewContext()
@@ -133,8 +136,14 @@ func TestInstantiateEquality(t *testing.T) {
 
 func TestInstantiateNonEquality(t *testing.T) {
 	const src = "package p; type T[P any] int"
-	pkg1 := mustTypecheck(src, nil, nil)
-	pkg2 := mustTypecheck(src, nil, nil)
+	pkg1, err := pkgFor(".", src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg2, err := pkgFor(".", src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// We consider T1 and T2 to be distinct types, so their instances should not
 	// be deduplicated by the context.
 	T1 := pkg1.Scope().Lookup("T").Type().(*Named)
@@ -179,7 +188,10 @@ var X T[int]
 
 	for _, test := range tests {
 		src := prefix + test.decl
-		pkg := mustTypecheck(src, nil, nil)
+		pkg, err := pkgFor(".", src, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
 		typ := NewPointer(pkg.Scope().Lookup("X").Type())
 		obj, _, _ := LookupFieldOrMethod(typ, false, pkg, "m")
 		m, _ := obj.(*Func)
@@ -201,7 +213,10 @@ func (T[P]) m() {}
 
 var _ T[int]
 `
-	pkg := mustTypecheck(src, nil, nil)
+	pkg, err := pkgFor(".", src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	typ := pkg.Scope().Lookup("T").Type().(*Named)
 	obj, _, _ := LookupFieldOrMethod(typ, false, pkg, "m")
 	if obj == nil {
@@ -218,15 +233,15 @@ var _ T[int]
 
 // Copied from errors.go.
 func stripAnnotations(s string) string {
-	var buf strings.Builder
+	var b strings.Builder
 	for _, r := range s {
 		// strip #'s and subscript digits
 		if r < '₀' || '₀'+10 <= r { // '₀' == U+2080
-			buf.WriteRune(r)
+			b.WriteRune(r)
 		}
 	}
-	if buf.Len() < len(s) {
-		return buf.String()
+	if b.Len() < len(s) {
+		return b.String()
 	}
 	return s
 }

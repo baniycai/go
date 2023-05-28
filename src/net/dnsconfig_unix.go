@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build !js && !wasip1 && !windows
+//go:build !js && !windows
 
 // Read system DNS config from /etc/resolv.conf
 
@@ -10,7 +10,6 @@ package net
 
 import (
 	"internal/bytealg"
-	"net/netip"
 	"time"
 )
 
@@ -52,7 +51,9 @@ func dnsReadConfig(filename string) *dnsConfig {
 				// One more check: make sure server name is
 				// just an IP address. Otherwise we need DNS
 				// to look it up.
-				if _, err := netip.ParseAddr(f[1]); err == nil {
+				if parseIPv4(f[1]) != nil {
+					conf.servers = append(conf.servers, JoinHostPort(f[1], "53"))
+				} else if ip, _ := parseIPv6Zone(f[1]); ip != nil {
 					conf.servers = append(conf.servers, JoinHostPort(f[1], "53"))
 				}
 			}
@@ -63,13 +64,9 @@ func dnsReadConfig(filename string) *dnsConfig {
 			}
 
 		case "search": // set search path to given servers
-			conf.search = make([]string, 0, len(f)-1)
-			for i := 1; i < len(f); i++ {
-				name := ensureRooted(f[i])
-				if name == "." {
-					continue
-				}
-				conf.search = append(conf.search, name)
+			conf.search = make([]string, len(f)-1)
+			for i := 0; i < len(conf.search); i++ {
+				conf.search[i] = ensureRooted(f[i+1])
 			}
 
 		case "options": // magic options
@@ -112,13 +109,6 @@ func dnsReadConfig(filename string) *dnsConfig {
 					// https://www.freebsd.org/cgi/man.cgi?query=resolv.conf&sektion=5&manpath=freebsd-release-ports
 					// https://man.openbsd.org/resolv.conf.5
 					conf.useTCP = true
-				case s == "trust-ad":
-					conf.trustAD = true
-				case s == "edns0":
-					// We use EDNS by default.
-					// Ignore this option.
-				case s == "no-reload":
-					conf.noReload = true
 				default:
 					conf.unknownOpt = true
 				}

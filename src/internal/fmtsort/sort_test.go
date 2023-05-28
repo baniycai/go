@@ -147,7 +147,7 @@ func sprint(data any) string {
 		}
 		b.WriteString(sprintKey(key))
 		b.WriteRune(':')
-		fmt.Fprint(b, om.Value[i])
+		b.WriteString(fmt.Sprint(om.Value[i]))
 	}
 	return b.String()
 }

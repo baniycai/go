@@ -7,6 +7,7 @@
 package ld
 
 import (
+	"bytes"
 	"cmd/internal/bio"
 	"cmd/internal/obj"
 	"cmd/internal/objabi"
@@ -382,9 +383,9 @@ func Adddynsym(ldr *loader.Loader, target *Target, syms *ArchSyms, s loader.Sym)
 }
 
 func fieldtrack(arch *sys.Arch, l *loader.Loader) {
-	var buf strings.Builder
+	var buf bytes.Buffer
 	for i := loader.Sym(1); i < loader.Sym(l.NSym()); i++ {
-		if name := l.SymName(i); strings.HasPrefix(name, "go:track.") {
+		if name := l.SymName(i); strings.HasPrefix(name, "go.track.") {
 			if l.AttrReachable(i) {
 				l.SetAttrSpecial(i, true)
 				l.SetAttrNotInSymbolTable(i, true)
@@ -450,5 +451,50 @@ func (ctxt *Link) addexport() {
 
 	for _, lib := range dedupLibraries(ctxt, dynlib) {
 		adddynlib(ctxt, lib)
+	}
+}
+
+type Pkg struct {
+	mark    bool
+	checked bool
+	path    string
+	impby   []*Pkg
+}
+
+var pkgall []*Pkg
+
+func (p *Pkg) cycle() *Pkg {
+	if p.checked {
+		return nil
+	}
+
+	if p.mark {
+		nerrors++
+		fmt.Printf("import cycle:\n")
+		fmt.Printf("\t%s\n", p.path)
+		return p
+	}
+
+	p.mark = true
+	for _, q := range p.impby {
+		if bad := q.cycle(); bad != nil {
+			p.mark = false
+			p.checked = true
+			fmt.Printf("\timports %s\n", p.path)
+			if bad == p {
+				return nil
+			}
+			return bad
+		}
+	}
+
+	p.checked = true
+	p.mark = false
+	return nil
+}
+
+func importcycles() {
+	for _, p := range pkgall {
+		p.cycle()
 	}
 }

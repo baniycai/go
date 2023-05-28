@@ -15,7 +15,6 @@ package runtime
 import (
 	"internal/goarch"
 	"runtime/internal/atomic"
-	"runtime/internal/sys"
 	"unsafe"
 )
 
@@ -23,10 +22,9 @@ import (
 // per-arena bitmap with a bit for every word in the arena. The mark
 // is stored on the bit corresponding to the first word of the marked
 // allocation.
-type checkmarksMap struct {
-	_ sys.NotInHeap
-	b [heapArenaBytes / goarch.PtrSize / 8]uint8
-}
+//
+//go:notinheap
+type checkmarksMap [heapArenaBytes / goarch.PtrSize / 8]uint8
 
 // If useCheckmark is true, marking of an object uses the checkmark
 // bits instead of the standard mark bits.
@@ -52,8 +50,8 @@ func startCheckmarks() {
 			arena.checkmarks = bitmap
 		} else {
 			// Otherwise clear the existing bitmap.
-			for i := range bitmap.b {
-				bitmap.b[i] = 0
+			for i := range bitmap {
+				bitmap[i] = 0
 			}
 		}
 	}
@@ -90,9 +88,9 @@ func setCheckmark(obj, base, off uintptr, mbits markBits) bool {
 
 	ai := arenaIndex(obj)
 	arena := mheap_.arenas[ai.l1()][ai.l2()]
-	arenaWord := (obj / heapArenaBytes / 8) % uintptr(len(arena.checkmarks.b))
+	arenaWord := (obj / heapArenaBytes / 8) % uintptr(len(arena.checkmarks))
 	mask := byte(1 << ((obj / heapArenaBytes) % 8))
-	bytep := &arena.checkmarks.b[arenaWord]
+	bytep := &arena.checkmarks[arenaWord]
 
 	if atomic.Load8(bytep)&mask != 0 {
 		// Already checkmarked.

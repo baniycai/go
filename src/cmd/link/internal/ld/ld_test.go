@@ -9,7 +9,8 @@ import (
 	"debug/pe"
 	"fmt"
 	"internal/testenv"
-	"os"
+	"io/ioutil"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -21,11 +22,11 @@ func TestUndefinedRelocErrors(t *testing.T) {
 
 	// When external linking, symbols may be defined externally, so we allow
 	// undefined symbols and let external linker resolve. Skip the test.
-	testenv.MustInternalLink(t, false)
+	testenv.MustInternalLink(t)
 
 	t.Parallel()
 
-	out, err := testenv.Command(t, testenv.GoToolPath(t), "build", "./testdata/issue10978").CombinedOutput()
+	out, err := exec.Command(testenv.GoToolPath(t), "build", "./testdata/issue10978").CombinedOutput()
 	if err == nil {
 		t.Fatal("expected build to fail")
 	}
@@ -65,9 +66,6 @@ func TestUndefinedRelocErrors(t *testing.T) {
 		case n > 0:
 			t.Errorf("unmatched error: %s (x%d)", want, n)
 		case n < 0:
-			if runtime.GOOS == "android" && runtime.GOARCH == "arm64" {
-				testenv.SkipFlaky(t, 58807)
-			}
 			t.Errorf("extra errors: %s (x%d)", want, -n)
 		}
 	}
@@ -109,13 +107,13 @@ func TestArchiveBuildInvokeWithExec(t *testing.T) {
 
 	srcfile := filepath.Join(dir, "test.go")
 	arfile := filepath.Join(dir, "test.a")
-	if err := os.WriteFile(srcfile, []byte(carchiveSrcText), 0666); err != nil {
+	if err := ioutil.WriteFile(srcfile, []byte(carchiveSrcText), 0666); err != nil {
 		t.Fatal(err)
 	}
 
 	ldf := fmt.Sprintf("-ldflags=-v -tmpdir=%s", dir)
 	argv := []string{"build", "-buildmode=c-archive", "-o", arfile, ldf, srcfile}
-	out, err := testenv.Command(t, testenv.GoToolPath(t), argv...).CombinedOutput()
+	out, err := exec.Command(testenv.GoToolPath(t), argv...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("build failure: %s\n%s\n", err, string(out))
 	}
@@ -157,13 +155,13 @@ func TestLargeTextSectionSplitting(t *testing.T) {
 	// is arbitrary; we just need something sufficiently large that uses
 	// external linking.
 	exe := filepath.Join(dir, "go.exe")
-	out, err := testenv.Command(t, testenv.GoToolPath(t), "build", "-o", exe, "-ldflags=-linkmode=external -debugtextsize=1048576", "cmd/go").CombinedOutput()
+	out, err := exec.Command(testenv.GoToolPath(t), "build", "-o", exe, "-ldflags=-linkmode=external -debugtextsize=1048576", "cmd/go").CombinedOutput()
 	if err != nil {
 		t.Fatalf("build failure: %s\n%s\n", err, string(out))
 	}
 
 	// Check that we did split text sections.
-	out, err = testenv.Command(t, testenv.GoToolPath(t), "tool", "nm", exe).CombinedOutput()
+	out, err = exec.Command(testenv.GoToolPath(t), "tool", "nm", exe).CombinedOutput()
 	if err != nil {
 		t.Fatalf("nm failure: %s\n%s\n", err, string(out))
 	}
@@ -172,7 +170,7 @@ func TestLargeTextSectionSplitting(t *testing.T) {
 	}
 
 	// Result should be runnable.
-	_, err = testenv.Command(t, exe, "version").CombinedOutput()
+	_, err = exec.Command(exe, "version").CombinedOutput()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +202,7 @@ func testWindowsBuildmodeCSharedASLR(t *testing.T, useASLR bool) {
 
 	srcfile := filepath.Join(dir, "test.go")
 	objfile := filepath.Join(dir, "test.dll")
-	if err := os.WriteFile(srcfile, []byte(`package main; func main() { print("hello") }`), 0666); err != nil {
+	if err := ioutil.WriteFile(srcfile, []byte(`package main; func main() { print("hello") }`), 0666); err != nil {
 		t.Fatal(err)
 	}
 	argv := []string{"build", "-buildmode=c-shared"}
@@ -212,7 +210,7 @@ func testWindowsBuildmodeCSharedASLR(t *testing.T, useASLR bool) {
 		argv = append(argv, "-ldflags", "-aslr=false")
 	}
 	argv = append(argv, "-o", objfile, srcfile)
-	out, err := testenv.Command(t, testenv.GoToolPath(t), argv...).CombinedOutput()
+	out, err := exec.Command(testenv.GoToolPath(t), argv...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("build failure: %s\n%s\n", err, string(out))
 	}
@@ -329,10 +327,10 @@ func main() {
 			t.Parallel()
 			tempDir := t.TempDir()
 			src := filepath.Join(tempDir, "x.go")
-			if err := os.WriteFile(src, []byte(tt.prog), 0644); err != nil {
+			if err := ioutil.WriteFile(src, []byte(tt.prog), 0644); err != nil {
 				t.Fatal(err)
 			}
-			cmd := testenv.Command(t, testenv.GoToolPath(t), "run", src)
+			cmd := exec.Command(testenv.GoToolPath(t), "run", src)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				t.Fatal(err)

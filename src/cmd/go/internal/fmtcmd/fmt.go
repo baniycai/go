@@ -21,7 +21,6 @@ import (
 
 func init() {
 	base.AddBuildFlagsNX(&CmdFmt.Flag)
-	base.AddChdirFlag(&CmdFmt.Flag)
 	base.AddModFlag(&CmdFmt.Flag)
 	base.AddModCommonFlags(&CmdFmt.Flag)
 }
@@ -98,7 +97,10 @@ func runFmt(ctx context.Context, cmd *base.Command, args []string) {
 }
 
 func gofmtPath() string {
-	gofmt := "gofmt" + cfg.ToolExeSuffix()
+	gofmt := "gofmt"
+	if base.ToolIsWindows {
+		gofmt += base.ToolWindowsExtension
+	}
 
 	gofmtPath := filepath.Join(cfg.GOBIN, gofmt)
 	if _, err := os.Stat(gofmtPath); err == nil {

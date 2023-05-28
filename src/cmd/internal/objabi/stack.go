@@ -4,29 +4,28 @@
 
 package objabi
 
-import (
-	"internal/abi"
-	"internal/buildcfg"
+import "internal/buildcfg"
+
+// For the linkers. Must match Go definitions.
+
+const (
+	STACKSYSTEM = 0
+	StackSystem = STACKSYSTEM
+	StackBig    = 4096
+	StackSmall  = 128
 )
 
-func StackNosplit(race bool) int {
-	// This arithmetic must match that in runtime/stack.go:stackNosplit.
-	return abi.StackNosplitBase * stackGuardMultiplier(race)
-}
+// Initialize StackGuard and StackLimit according to target system.
+var StackGuard = 928*stackGuardMultiplier() + StackSystem
+var StackLimit = StackGuard - StackSystem - StackSmall
 
 // stackGuardMultiplier returns a multiplier to apply to the default
 // stack guard size. Larger multipliers are used for non-optimized
 // builds that have larger stack frames or for specific targets.
-func stackGuardMultiplier(race bool) int {
-	// This arithmetic must match that in runtime/internal/sys/consts.go:StackGuardMultiplier.
-	n := 1
+func stackGuardMultiplier() int {
 	// On AIX, a larger stack is needed for syscalls.
 	if buildcfg.GOOS == "aix" {
-		n += 1
+		return 2
 	}
-	// The race build also needs more stack.
-	if race {
-		n += 1
-	}
-	return n
+	return stackGuardMultiplierDefault
 }

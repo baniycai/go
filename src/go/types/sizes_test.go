@@ -9,8 +9,9 @@ package types_test
 import (
 	"go/ast"
 	"go/importer"
+	"go/parser"
+	"go/token"
 	"go/types"
-	"internal/testenv"
 	"testing"
 )
 
@@ -20,9 +21,17 @@ func findStructType(t *testing.T, src string) *types.Struct {
 }
 
 func findStructTypeConfig(t *testing.T, src string, conf *types.Config) *types.Struct {
-	types_ := make(map[ast.Expr]types.TypeAndValue)
-	mustTypecheck(src, nil, &types.Info{Types: types_})
-	for _, tv := range types_ {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "x.go", src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := types.Info{Types: make(map[ast.Expr]types.TypeAndValue)}
+	_, err = conf.Check("x", fset, []*ast.File{f}, &info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tv := range info.Types {
 		if ts, ok := tv.Type.(*types.Struct); ok {
 			return ts
 		}
@@ -31,7 +40,7 @@ func findStructTypeConfig(t *testing.T, src string, conf *types.Config) *types.S
 	return nil
 }
 
-// go.dev/issue/16316
+// Issue 16316
 func TestMultipleSizeUse(t *testing.T) {
 	const src = `
 package main
@@ -54,7 +63,7 @@ type S struct {
 	}
 }
 
-// go.dev/issue/16464
+// Issue 16464
 func TestAlignofNaclSlice(t *testing.T) {
 	const src = `
 package main
@@ -85,22 +94,28 @@ import "unsafe"
 
 const _ = unsafe.Offsetof(struct{ x int64 }{}.x)
 `
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "x.go", src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	info := types.Info{Types: make(map[ast.Expr]types.TypeAndValue)}
 	conf := types.Config{
 		Importer: importer.Default(),
 		Sizes:    &types.StdSizes{WordSize: 8, MaxAlign: 8},
 	}
-	mustTypecheck(src, &conf, &info)
+	_, err = conf.Check("x", fset, []*ast.File{f}, &info)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tv := range info.Types {
 		_ = conf.Sizes.Sizeof(tv.Type)
 		_ = conf.Sizes.Alignof(tv.Type)
 	}
 }
 
-// go.dev/issue/53884.
+// Issue #53884.
 func TestAtomicAlign(t *testing.T) {
-	testenv.MustHaveGoBuild(t) // The Go command is needed for the importer to determine the locations of stdlib .a files.
-
 	const src = `
 package main
 

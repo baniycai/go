@@ -8,7 +8,6 @@ package workcmd
 
 import (
 	"cmd/go/internal/base"
-	"cmd/go/internal/gover"
 	"cmd/go/internal/imports"
 	"cmd/go/internal/modload"
 	"context"
@@ -42,7 +41,6 @@ for more information.
 }
 
 func init() {
-	base.AddChdirFlag(&cmdSync.Flag)
 	base.AddModCommonFlags(&cmdSync.Flag)
 }
 
@@ -84,7 +82,7 @@ func runSync(ctx context.Context, cmd *base.Command, args []string) {
 				inMustSelect[r] = true
 			}
 		}
-		gover.ModSort(mustSelect) // ensure determinism
+		module.Sort(mustSelect) // ensure determinism
 		mustSelectFor[m] = mustSelect
 	}
 

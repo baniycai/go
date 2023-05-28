@@ -34,4 +34,4 @@ func Getpgrp() (pgrp int) {
 	return
 }
 
-var IoctlPtr = ioctlPtr
+var Ioctl = ioctl

@@ -1,3 +1,3 @@
-module cmd/objdump/testdata/testfilenum
+module objdumptest
 
 go 1.16

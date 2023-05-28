@@ -7,9 +7,9 @@ package template
 // Tests for multiple-template parsing and execution.
 
 import (
+	"bytes"
 	"fmt"
 	"os"
-	"strings"
 	"testing"
 	"text/template/parse"
 )
@@ -242,7 +242,7 @@ func TestClone(t *testing.T) {
 		}
 	}
 	// Execute root.
-	var b strings.Builder
+	var b bytes.Buffer
 	err = root.ExecuteTemplate(&b, "a", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -281,7 +281,7 @@ func TestAddParseTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Execute.
-	var b strings.Builder
+	var b bytes.Buffer
 	err = added.ExecuteTemplate(&b, "a", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -410,7 +410,7 @@ func TestEmptyTemplate(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		buf := &strings.Builder{}
+		buf := &bytes.Buffer{}
 		if err := m.Execute(buf, c.in); err != nil {
 			t.Error(i, err)
 			continue
@@ -445,7 +445,7 @@ func TestIssue19294(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		var buf strings.Builder
+		var buf bytes.Buffer
 		res.Execute(&buf, 0)
 		if buf.String() != "stylesheet" {
 			t.Fatalf("iteration %d: got %q; expected %q", i, buf.String(), "stylesheet")

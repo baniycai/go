@@ -73,7 +73,8 @@ func Usage() {
 }
 
 func Parse() {
-	objabi.Flagparse(Usage)
+	flag.Usage = Usage
+	flag.Parse()
 	if flag.NArg() == 0 {
 		flag.Usage()
 	}
@@ -84,7 +85,9 @@ func Parse() {
 			flag.Usage()
 		}
 		input := filepath.Base(flag.Arg(0))
-		input = strings.TrimSuffix(input, ".s")
+		if strings.HasSuffix(input, ".s") {
+			input = input[:len(input)-2]
+		}
 		*OutputFile = fmt.Sprintf("%s.o", input)
 	}
 }

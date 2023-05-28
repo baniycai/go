@@ -7,7 +7,9 @@ package test
 import (
 	"bytes"
 	"internal/testenv"
+	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -30,7 +32,7 @@ func TestReproducibleBuilds(t *testing.T) {
 		t.Run(test, func(t *testing.T) {
 			t.Parallel()
 			var want []byte
-			tmp, err := os.CreateTemp("", "")
+			tmp, err := ioutil.TempFile("", "")
 			if err != nil {
 				t.Fatalf("temp file creation failed: %v", err)
 			}
@@ -39,11 +41,11 @@ func TestReproducibleBuilds(t *testing.T) {
 			for i := 0; i < iters; i++ {
 				// Note: use -c 2 to expose any nondeterminism which is the result
 				// of the runtime scheduler.
-				out, err := testenv.Command(t, testenv.GoToolPath(t), "tool", "compile", "-p=p", "-c", "2", "-o", tmp.Name(), filepath.Join("testdata", "reproducible", test)).CombinedOutput()
+				out, err := exec.Command(testenv.GoToolPath(t), "tool", "compile", "-p=p", "-c", "2", "-o", tmp.Name(), filepath.Join("testdata", "reproducible", test)).CombinedOutput()
 				if err != nil {
 					t.Fatalf("failed to compile: %v\n%s", err, out)
 				}
-				obj, err := os.ReadFile(tmp.Name())
+				obj, err := ioutil.ReadFile(tmp.Name())
 				if err != nil {
 					t.Fatalf("failed to read object file: %v", err)
 				}
@@ -76,14 +78,18 @@ func TestIssue38068(t *testing.T) {
 		{tag: "serial", args: "-c=1"},
 		{tag: "concurrent", args: "-c=2"}}
 
-	tmpdir := t.TempDir()
+	tmpdir, err := ioutil.TempDir("", "TestIssue38068")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpdir)
 
 	src := filepath.Join("testdata", "reproducible", "issue38068.go")
 	for i := range scenarios {
 		s := &scenarios[i]
 		s.libpath = filepath.Join(tmpdir, s.tag+".a")
 		// Note: use of "-p" required in order for DWARF to be generated.
-		cmd := testenv.Command(t, testenv.GoToolPath(t), "tool", "compile", "-p=issue38068", "-buildid=", s.args, "-o", s.libpath, src)
+		cmd := exec.Command(testenv.GoToolPath(t), "tool", "compile", "-p=issue38068", "-buildid=", s.args, "-o", s.libpath, src)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("%v: %v:\n%s", cmd.Args, err, out)
@@ -91,7 +97,7 @@ func TestIssue38068(t *testing.T) {
 	}
 
 	readBytes := func(fn string) []byte {
-		payload, err := os.ReadFile(fn)
+		payload, err := ioutil.ReadFile(fn)
 		if err != nil {
 			t.Fatalf("failed to read executable '%s': %v", fn, err)
 		}

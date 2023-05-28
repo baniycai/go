@@ -99,9 +99,6 @@ func linkFlags(rawFlags uint32) Flags {
 	if rawFlags&syscall.IFF_UP != 0 {
 		f |= FlagUp
 	}
-	if rawFlags&syscall.IFF_RUNNING != 0 {
-		f |= FlagRunning
-	}
 	if rawFlags&syscall.IFF_BROADCAST != 0 {
 		f |= FlagBroadcast
 	}

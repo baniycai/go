@@ -420,7 +420,7 @@ func (pkg *Package) oneLineNodeDepth(node ast.Node, depth int) string {
 
 	default:
 		// As a fallback, use default formatter for all unknown node types.
-		buf := new(strings.Builder)
+		buf := new(bytes.Buffer)
 		format.Node(buf, pkg.fs, node)
 		s := buf.String()
 		if strings.Contains(s, "\n") {
@@ -849,7 +849,7 @@ func (pkg *Package) typeDoc(typ *doc.Type) {
 // structs and methods from interfaces (unless the unexported flag is set or we
 // are asked to show the original source).
 func trimUnexportedElems(spec *ast.TypeSpec) {
-	if showSrc {
+	if unexported || showSrc {
 		return
 	}
 	switch typ := spec.Type.(type) {
@@ -870,43 +870,6 @@ func trimUnexportedFields(fields *ast.FieldList, isInterface bool) *ast.FieldLis
 	trimmed := false
 	list := make([]*ast.Field, 0, len(fields.List))
 	for _, field := range fields.List {
-		// When printing fields we normally print field.Doc.
-		// Here we are going to pass the AST to go/format,
-		// which will print the comments from the AST,
-		// not field.Doc which is from go/doc.
-		// The two are similar but not identical;
-		// for example, field.Doc does not include directives.
-		// In order to consistently print field.Doc,
-		// we replace the comment in the AST with field.Doc.
-		// That will cause go/format to print what we want.
-		// See issue #56592.
-		if field.Doc != nil {
-			doc := field.Doc
-			text := doc.Text()
-
-			trailingBlankLine := len(doc.List[len(doc.List)-1].Text) == 2
-			if !trailingBlankLine {
-				// Remove trailing newline.
-				lt := len(text)
-				if lt > 0 && text[lt-1] == '\n' {
-					text = text[:lt-1]
-				}
-			}
-
-			start := doc.List[0].Slash
-			doc.List = doc.List[:0]
-			for _, line := range strings.Split(text, "\n") {
-				prefix := "// "
-				if len(line) > 0 && line[0] == '\t' {
-					prefix = "//"
-				}
-				doc.List = append(doc.List, &ast.Comment{
-					Text: prefix + line,
-				})
-			}
-			doc.List[0].Slash = start
-		}
-
 		names := field.Names
 		if len(names) == 0 {
 			// Embedded type. Use the name of the type. It must be of the form ident or
@@ -945,13 +908,11 @@ func trimUnexportedFields(fields *ast.FieldList, isInterface bool) *ast.FieldLis
 		}
 		// Trims if any is unexported. Good enough in practice.
 		ok := true
-		if !unexported {
-			for _, name := range names {
-				if !isExported(name.Name) {
-					trimmed = true
-					ok = false
-					break
-				}
+		for _, name := range names {
+			if !isExported(name.Name) {
+				trimmed = true
+				ok = false
+				break
 			}
 		}
 		if ok {

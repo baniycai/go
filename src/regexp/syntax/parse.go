@@ -44,7 +44,6 @@ const (
 	ErrTrailingBackslash     ErrorCode = "trailing backslash at end of expression"
 	ErrUnexpectedParen       ErrorCode = "unexpected )"
 	ErrNestingDepth          ErrorCode = "expression nests too deeply"
-	ErrLarge                 ErrorCode = "expression too large"
 )
 
 func (e ErrorCode) String() string {
@@ -160,7 +159,7 @@ func (p *parser) reuse(re *Regexp) {
 
 func (p *parser) checkLimits(re *Regexp) {
 	if p.numRunes > maxRunes {
-		panic(ErrLarge)
+		panic(ErrInternalError)
 	}
 	p.checkSize(re)
 	p.checkHeight(re)
@@ -204,7 +203,7 @@ func (p *parser) checkSize(re *Regexp) {
 	}
 
 	if p.calcSize(re, true) > maxSize {
-		panic(ErrLarge)
+		panic(ErrInternalError)
 	}
 }
 
@@ -898,8 +897,8 @@ func parse(s string, flags Flags) (_ *Regexp, err error) {
 			panic(r)
 		case nil:
 			// ok
-		case ErrLarge: // too big
-			err = &Error{Code: ErrLarge, Expr: s}
+		case ErrInternalError: // too big
+			err = &Error{Code: ErrInternalError, Expr: s}
 		case ErrNestingDepth:
 			err = &Error{Code: ErrNestingDepth, Expr: s}
 		}
@@ -1938,7 +1937,7 @@ func appendClass(r []rune, x []rune) []rune {
 	return r
 }
 
-// appendFoldedClass returns the result of appending the case folding of the class x to the class r.
+// appendFolded returns the result of appending the case folding of the class x to the class r.
 func appendFoldedClass(r []rune, x []rune) []rune {
 	for i := 0; i < len(x); i += 2 {
 		r = appendFoldedRange(r, x[i], x[i+1])

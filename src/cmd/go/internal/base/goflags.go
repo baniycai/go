@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"cmd/go/internal/cfg"
-	"cmd/internal/quoted"
 )
 
 var goflags []string // cached $GOFLAGS list; can be -x or --x form
@@ -31,26 +30,18 @@ func InitGOFLAGS() {
 		return
 	}
 
-	// Ignore bad flag in go env and go bug, because
-	// they are what people reach for when debugging
-	// a problem, and maybe they're debugging GOFLAGS.
-	// (Both will show the GOFLAGS setting if let succeed.)
-	hideErrors := cfg.CmdName == "env" || cfg.CmdName == "bug"
-
-	var err error
-	goflags, err = quoted.Split(cfg.Getenv("GOFLAGS"))
-	if err != nil {
-		if hideErrors {
-			return
-		}
-		Fatalf("go: parsing $GOFLAGS: %v", err)
-	}
-
+	goflags = strings.Fields(cfg.Getenv("GOFLAGS"))
 	if len(goflags) == 0 {
 		// nothing to do; avoid work on later InitGOFLAGS call
 		goflags = []string{}
 		return
 	}
+
+	// Ignore bad flag in go env and go bug, because
+	// they are what people reach for when debugging
+	// a problem, and maybe they're debugging GOFLAGS.
+	// (Both will show the GOFLAGS setting if let succeed.)
+	hideErrors := cfg.CmdName == "env" || cfg.CmdName == "bug"
 
 	// Each of the words returned by strings.Fields must be its own flag.
 	// To set flag arguments use -x=value instead of -x value.

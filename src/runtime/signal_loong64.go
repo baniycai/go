@@ -77,8 +77,10 @@ func (c *sigctxt) preparePanic(sig uint32, gp *g) {
 	}
 
 	// In case we are panicking from external C code
+	sigpanicPC := uint64(abi.FuncPCABIInternal(sigpanic))
+	c.set_r31(sigpanicPC >> 32 << 32) // RSB register
 	c.set_r22(uint64(uintptr(unsafe.Pointer(gp))))
-	c.set_pc(uint64(abi.FuncPCABIInternal(sigpanic)))
+	c.set_pc(sigpanicPC)
 }
 
 func (c *sigctxt) pushCall(targetPC, resumePC uintptr) {

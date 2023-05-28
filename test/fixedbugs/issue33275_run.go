@@ -1,4 +1,4 @@
-// +build !nacl,!js,!wasip1,!gccgo
+// +build !nacl,!js,!gccgo
 // run
 
 // Copyright 2019 The Go Authors. All rights reserved.

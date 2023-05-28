@@ -33,7 +33,7 @@ func WriteExpr(buf *bytes.Buffer, x ast.Expr) {
 
 	switch x := x.(type) {
 	default:
-		fmt.Fprintf(buf, "(ast: %T)", x) // nil, ast.BadExpr, ast.KeyValueExpr
+		buf.WriteString(fmt.Sprintf("(ast: %T)", x)) // nil, ast.BadExpr, ast.KeyValueExpr
 
 	case *ast.Ident:
 		buf.WriteString(x.Name)
@@ -53,12 +53,9 @@ func WriteExpr(buf *bytes.Buffer, x ast.Expr) {
 		buf.WriteString(" literal)") // shortened
 
 	case *ast.CompositeLit:
+		buf.WriteByte('(')
 		WriteExpr(buf, x.Type)
-		buf.WriteByte('{')
-		if len(x.Elts) > 0 {
-			buf.WriteString("…")
-		}
-		buf.WriteByte('}')
+		buf.WriteString(" literal)") // shortened
 
 	case *ast.ParenExpr:
 		buf.WriteByte('(')

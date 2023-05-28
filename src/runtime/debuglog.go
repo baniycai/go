@@ -17,7 +17,6 @@ package runtime
 
 import (
 	"runtime/internal/atomic"
-	"runtime/internal/sys"
 	"unsafe"
 )
 
@@ -64,7 +63,7 @@ func dlog() *dlogger {
 		allp := (*uintptr)(unsafe.Pointer(&allDloggers))
 		all := (*dlogger)(unsafe.Pointer(atomic.Loaduintptr(allp)))
 		for l1 := all; l1 != nil; l1 = l1.allLink {
-			if l1.owned.Load() == 0 && l1.owned.CompareAndSwap(0, 1) {
+			if atomic.Load(&l1.owned) == 0 && atomic.Cas(&l1.owned, 0, 1) {
 				l = l1
 				break
 			}
@@ -80,7 +79,7 @@ func dlog() *dlogger {
 			throw("failed to allocate debug log")
 		}
 		l.w.r.data = &l.w.data
-		l.owned.Store(1)
+		l.owned = 1
 
 		// Prepend to allDloggers list.
 		headp := (*uintptr)(unsafe.Pointer(&allDloggers))
@@ -122,8 +121,9 @@ func dlog() *dlogger {
 //
 // To obtain a dlogger, call dlog(). When done with the dlogger, call
 // end().
+//
+//go:notinheap
 type dlogger struct {
-	_ sys.NotInHeap
 	w debugLogWriter
 
 	// allLink is the next dlogger in the allDloggers list.
@@ -131,7 +131,7 @@ type dlogger struct {
 
 	// owned indicates that this dlogger is owned by an M. This is
 	// accessed atomically.
-	owned atomic.Uint32
+	owned uint32
 }
 
 // allDloggers is a list of all dloggers, linked through
@@ -160,7 +160,7 @@ func (l *dlogger) end() {
 	}
 
 	// Return the logger to the global pool.
-	l.owned.Store(0)
+	atomic.Store(&l.owned, 0)
 }
 
 const (
@@ -277,7 +277,7 @@ func (l *dlogger) p(x any) *dlogger {
 		l.w.uvarint(0)
 	} else {
 		v := efaceOf(&x)
-		switch v._type.Kind_ & kindMask {
+		switch v._type.kind & kindMask {
 		case kindChan, kindFunc, kindMap, kindPtr, kindUnsafePointer:
 			l.w.uvarint(uint64(uintptr(v.data)))
 		default:
@@ -292,24 +292,21 @@ func (l *dlogger) s(x string) *dlogger {
 	if !dlogEnabled {
 		return l
 	}
-
-	strData := unsafe.StringData(x)
+	str := stringStructOf(&x)
 	datap := &firstmoduledata
-	if len(x) > 4 && datap.etext <= uintptr(unsafe.Pointer(strData)) && uintptr(unsafe.Pointer(strData)) < datap.end {
+	if len(x) > 4 && datap.etext <= uintptr(str.str) && uintptr(str.str) < datap.end {
 		// String constants are in the rodata section, which
 		// isn't recorded in moduledata. But it has to be
 		// somewhere between etext and end.
 		l.w.byte(debugLogConstString)
-		l.w.uvarint(uint64(len(x)))
-		l.w.uvarint(uint64(uintptr(unsafe.Pointer(strData)) - datap.etext))
+		l.w.uvarint(uint64(str.len))
+		l.w.uvarint(uint64(uintptr(str.str) - datap.etext))
 	} else {
 		l.w.byte(debugLogString)
-		// We can't use unsafe.Slice as it may panic, which isn't safe
-		// in this (potentially) nowritebarrier context.
 		var b []byte
 		bb := (*slice)(unsafe.Pointer(&b))
-		bb.array = unsafe.Pointer(strData)
-		bb.len, bb.cap = len(x), len(x)
+		bb.array = str.str
+		bb.len, bb.cap = str.len, str.len
 		if len(b) > debugLogStringLimit {
 			b = b[:debugLogStringLimit]
 		}
@@ -359,8 +356,9 @@ func (l *dlogger) traceback(x []uintptr) *dlogger {
 // overwrite old records. Hence, it maintains a reader that consumes
 // the log as it gets overwritten. That reader state is where an
 // actual log reader would start.
+//
+//go:notinheap
 type debugLogWriter struct {
-	_     sys.NotInHeap
 	write uint64
 	data  debugLogBuf
 
@@ -378,10 +376,8 @@ type debugLogWriter struct {
 	buf [10]byte
 }
 
-type debugLogBuf struct {
-	_ sys.NotInHeap
-	b [debugLogBytes]byte
-}
+//go:notinheap
+type debugLogBuf [debugLogBytes]byte
 
 const (
 	// debugLogHeaderSize is the number of bytes in the framing
@@ -394,7 +390,7 @@ const (
 
 //go:nosplit
 func (l *debugLogWriter) ensure(n uint64) {
-	for l.write+n >= l.r.begin+uint64(len(l.data.b)) {
+	for l.write+n >= l.r.begin+uint64(len(l.data)) {
 		// Consume record at begin.
 		if l.r.skip() == ^uint64(0) {
 			// Wrapped around within a record.
@@ -410,8 +406,8 @@ func (l *debugLogWriter) ensure(n uint64) {
 
 //go:nosplit
 func (l *debugLogWriter) writeFrameAt(pos, size uint64) bool {
-	l.data.b[pos%uint64(len(l.data.b))] = uint8(size)
-	l.data.b[(pos+1)%uint64(len(l.data.b))] = uint8(size >> 8)
+	l.data[pos%uint64(len(l.data))] = uint8(size)
+	l.data[(pos+1)%uint64(len(l.data))] = uint8(size >> 8)
 	return size <= 0xFFFF
 }
 
@@ -445,7 +441,7 @@ func (l *debugLogWriter) byte(x byte) {
 	l.ensure(1)
 	pos := l.write
 	l.write++
-	l.data.b[pos%uint64(len(l.data.b))] = x
+	l.data[pos%uint64(len(l.data))] = x
 }
 
 //go:nosplit
@@ -454,7 +450,7 @@ func (l *debugLogWriter) bytes(x []byte) {
 	pos := l.write
 	l.write += uint64(len(x))
 	for len(x) > 0 {
-		n := copy(l.data.b[pos%uint64(len(l.data.b)):], x)
+		n := copy(l.data[pos%uint64(len(l.data)):], x)
 		pos += uint64(n)
 		x = x[n:]
 	}
@@ -517,15 +513,15 @@ func (r *debugLogReader) skip() uint64 {
 
 //go:nosplit
 func (r *debugLogReader) readUint16LEAt(pos uint64) uint16 {
-	return uint16(r.data.b[pos%uint64(len(r.data.b))]) |
-		uint16(r.data.b[(pos+1)%uint64(len(r.data.b))])<<8
+	return uint16(r.data[pos%uint64(len(r.data))]) |
+		uint16(r.data[(pos+1)%uint64(len(r.data))])<<8
 }
 
 //go:nosplit
 func (r *debugLogReader) readUint64LEAt(pos uint64) uint64 {
 	var b [8]byte
 	for i := range b {
-		b[i] = r.data.b[pos%uint64(len(r.data.b))]
+		b[i] = r.data[pos%uint64(len(r.data))]
 		pos++
 	}
 	return uint64(b[0]) | uint64(b[1])<<8 |
@@ -561,7 +557,7 @@ func (r *debugLogReader) peek() (tick uint64) {
 	pos := r.begin + debugLogHeaderSize
 	var u uint64
 	for i := uint(0); ; i += 7 {
-		b := r.data.b[pos%uint64(len(r.data.b))]
+		b := r.data[pos%uint64(len(r.data))]
 		pos++
 		u |= uint64(b&^0x80) << i
 		if b&0x80 == 0 {
@@ -592,7 +588,7 @@ func (r *debugLogReader) header() (end, tick, nano uint64, p int) {
 func (r *debugLogReader) uvarint() uint64 {
 	var u uint64
 	for i := uint(0); ; i += 7 {
-		b := r.data.b[r.begin%uint64(len(r.data.b))]
+		b := r.data[r.begin%uint64(len(r.data))]
 		r.begin++
 		u |= uint64(b&^0x80) << i
 		if b&0x80 == 0 {
@@ -614,7 +610,7 @@ func (r *debugLogReader) varint() int64 {
 }
 
 func (r *debugLogReader) printVal() bool {
-	typ := r.data.b[r.begin%uint64(len(r.data.b))]
+	typ := r.data[r.begin%uint64(len(r.data))]
 	r.begin++
 
 	switch typ {
@@ -648,7 +644,7 @@ func (r *debugLogReader) printVal() bool {
 			break
 		}
 		for sl > 0 {
-			b := r.data.b[r.begin%uint64(len(r.data.b)):]
+			b := r.data[r.begin%uint64(len(r.data)):]
 			if uint64(len(b)) > sl {
 				b = b[:sl]
 			}
@@ -660,8 +656,6 @@ func (r *debugLogReader) printVal() bool {
 	case debugLogConstString:
 		len, ptr := int(r.uvarint()), uintptr(r.uvarint())
 		ptr += firstmoduledata.etext
-		// We can't use unsafe.String as it may panic, which isn't safe
-		// in this (potentially) nowritebarrier context.
 		str := stringStruct{
 			str: unsafe.Pointer(ptr),
 			len: len,

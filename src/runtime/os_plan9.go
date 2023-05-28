@@ -69,14 +69,19 @@ func errstr() string
 
 type _Plink uintptr
 
+//go:linkname os_sigpipe os.sigpipe
+func os_sigpipe() {
+	throw("too many writes on closed pipe")
+}
+
 func sigpanic() {
-	gp := getg()
-	if !canpanic() {
+	g := getg()
+	if !canpanic(g) {
 		throw("unexpected signal during runtime execution")
 	}
 
-	note := gostringnocopy((*byte)(unsafe.Pointer(gp.m.notesig)))
-	switch gp.sig {
+	note := gostringnocopy((*byte)(unsafe.Pointer(g.m.notesig)))
+	switch g.sig {
 	case _SIGRFAULT, _SIGWFAULT:
 		i := indexNoFloat(note, "addr=")
 		if i >= 0 {
@@ -87,24 +92,17 @@ func sigpanic() {
 			panicmem()
 		}
 		addr := note[i:]
-		gp.sigcode1 = uintptr(atolwhex(addr))
-		if gp.sigcode1 < 0x1000 {
+		g.sigcode1 = uintptr(atolwhex(addr))
+		if g.sigcode1 < 0x1000 {
 			panicmem()
 		}
-		if gp.paniconfault {
-			panicmemAddr(gp.sigcode1)
+		if g.paniconfault {
+			panicmemAddr(g.sigcode1)
 		}
-		if inUserArenaChunk(gp.sigcode1) {
-			// We could check that the arena chunk is explicitly set to fault,
-			// but the fact that we faulted on accessing it is enough to prove
-			// that it is.
-			print("accessed data from freed user arena ", hex(gp.sigcode1), "\n")
-		} else {
-			print("unexpected fault address ", hex(gp.sigcode1), "\n")
-		}
+		print("unexpected fault address ", hex(g.sigcode1), "\n")
 		throw("fault")
 	case _SIGTRAP:
-		if gp.paniconfault {
+		if g.paniconfault {
 			panicmem()
 		}
 		throw(note)
@@ -314,9 +312,9 @@ func getpid() uint64 {
 }
 
 func osinit() {
-	physPageSize = getPageSize()
 	initBloc()
 	ncpu = getproccount()
+	physPageSize = getPageSize()
 	getg().m.procid = getpid()
 }
 
@@ -475,19 +473,19 @@ func semacreate(mp *m) {
 
 //go:nosplit
 func semasleep(ns int64) int {
-	gp := getg()
+	_g_ := getg()
 	if ns >= 0 {
 		ms := timediv(ns, 1000000, nil)
 		if ms == 0 {
 			ms = 1
 		}
-		ret := plan9_tsemacquire(&gp.m.waitsemacount, ms)
+		ret := plan9_tsemacquire(&_g_.m.waitsemacount, ms)
 		if ret == 1 {
 			return 0 // success
 		}
 		return -1 // timeout or interrupted
 	}
-	for plan9_semacquire(&gp.m.waitsemacount, 1) < 0 {
+	for plan9_semacquire(&_g_.m.waitsemacount, 1) < 0 {
 		// interrupted; try again (c.f. lock_sema.go)
 	}
 	return 0 // success

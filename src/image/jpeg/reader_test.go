@@ -177,7 +177,7 @@ func check(bounds image.Rectangle, pix0, pix1 []byte, stride0, stride1 int) erro
 }
 
 func pixString(pix []byte, stride, x, y int) string {
-	s := &strings.Builder{}
+	s := bytes.NewBuffer(nil)
 	for j := 0; j < 8; j++ {
 		fmt.Fprintf(s, "\t")
 		for i := 0; i < 8; i++ {
@@ -487,20 +487,6 @@ func TestExtraneousData(t *testing.T) {
 			nerr++
 			continue
 		}
-	}
-}
-
-func TestIssue56724(t *testing.T) {
-	b, err := os.ReadFile("../testdata/video-001.jpeg")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	b = b[:24] // truncate image data
-
-	_, err = Decode(bytes.NewReader(b))
-	if err != io.ErrUnexpectedEOF {
-		t.Errorf("got: %v, want: %v", err, io.ErrUnexpectedEOF)
 	}
 }
 

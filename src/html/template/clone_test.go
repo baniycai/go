@@ -5,6 +5,7 @@
 package template
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -21,7 +22,7 @@ func TestAddParseTreeHTML(t *testing.T) {
 		t.Fatal(err)
 	}
 	added := Must(root.AddParseTree("b", tree["b"]))
-	b := new(strings.Builder)
+	b := new(bytes.Buffer)
 	err = added.ExecuteTemplate(b, "a", "1>0")
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +39,7 @@ func TestClone(t *testing.T) {
 	// In the t2 template, it will be in a JavaScript context.
 	// In the t3 template, it will be in a CSS context.
 	const tmpl = `{{define "a"}}{{template "lhs"}}{{.}}{{template "rhs"}}{{end}}`
-	b := new(strings.Builder)
+	b := new(bytes.Buffer)
 
 	// Create an incomplete template t0.
 	t0 := Must(New("t0").Parse(tmpl))

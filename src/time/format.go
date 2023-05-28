@@ -116,9 +116,6 @@ const (
 	StampMilli = "Jan _2 15:04:05.000"
 	StampMicro = "Jan _2 15:04:05.000000"
 	StampNano  = "Jan _2 15:04:05.000000000"
-	DateTime   = "2006-01-02 15:04:05"
-	DateOnly   = "2006-01-02"
-	TimeOnly   = "15:04:05"
 )
 
 const (
@@ -403,62 +400,40 @@ func appendInt(b []byte, x int, width int) []byte {
 		u = uint(-x)
 	}
 
-	// 2-digit and 4-digit fields are the most common in time formats.
-	utod := func(u uint) byte { return '0' + byte(u) }
-	switch {
-	case width == 2 && u < 1e2:
-		return append(b, utod(u/1e1), utod(u%1e1))
-	case width == 4 && u < 1e4:
-		return append(b, utod(u/1e3), utod(u/1e2%1e1), utod(u/1e1%1e1), utod(u%1e1))
+	// Assemble decimal in reverse order.
+	var buf [20]byte
+	i := len(buf)
+	for u >= 10 {
+		i--
+		q := u / 10
+		buf[i] = byte('0' + u - q*10)
+		u = q
 	}
-
-	// Compute the number of decimal digits.
-	var n int
-	if u == 0 {
-		n = 1
-	}
-	for u2 := u; u2 > 0; u2 /= 10 {
-		n++
-	}
+	i--
+	buf[i] = byte('0' + u)
 
 	// Add 0-padding.
-	for pad := width - n; pad > 0; pad-- {
+	for w := len(buf) - i; w < width; w++ {
 		b = append(b, '0')
 	}
 
-	// Ensure capacity.
-	if len(b)+n <= cap(b) {
-		b = b[:len(b)+n]
-	} else {
-		b = append(b, make([]byte, n)...)
-	}
-
-	// Assemble decimal in reverse order.
-	i := len(b) - 1
-	for u >= 10 && i > 0 {
-		q := u / 10
-		b[i] = utod(u - q*10)
-		u = q
-		i--
-	}
-	b[i] = utod(u)
-	return b
+	return append(b, buf[i:]...)
 }
 
 // Never printed, just needs to be non-nil for return by atoi.
-var errAtoi = errors.New("time: invalid number")
+var atoiError = errors.New("time: invalid number")
 
 // Duplicates functionality in strconv, but avoids dependency.
-func atoi[bytes []byte | string](s bytes) (x int, err error) {
+func atoi(s string) (x int, err error) {
 	neg := false
-	if len(s) > 0 && (s[0] == '-' || s[0] == '+') {
+	if s != "" && (s[0] == '-' || s[0] == '+') {
 		neg = s[0] == '-'
 		s = s[1:]
 	}
 	q, rem, err := leadingInt(s)
 	x = int(q)
-	if err != nil || len(rem) > 0 {
-		return 0, errAtoi
+	if err != nil || rem != "" {
+		return 0, atoiError
 	}
 	if neg {
 		x = -x
@@ -466,7 +441,7 @@ func atoi[bytes []byte | string](s bytes) (x int, err error) {
 	return x, nil
 }
 
-// The "std" value passed to appendNano contains two packed fields: the number of
+// The "std" value passed to formatNano contains two packed fields: the number of
 // digits after the decimal and the separator character (period or comma).
 // These functions pack and unpack that variable.
 func stdFracSecond(code, n, c int) int {
@@ -488,29 +463,35 @@ func separator(std int) byte {
 	return ','
 }
 
-// appendNano appends a fractional second, as nanoseconds, to b
-// and returns the result. The nanosec must be within [0, 999999999].
-func appendNano(b []byte, nanosec int, std int) []byte {
-	trim := std&stdMask == stdFracSecond9
-	n := digitsLen(std)
-	if trim && (n == 0 || nanosec == 0) {
-		return b
+// formatNano appends a fractional second, as nanoseconds, to b
+// and returns the result.
+func formatNano(b []byte, nanosec uint, std int) []byte {
+	var (
+		n         = digitsLen(std)
+		separator = separator(std)
+		trim      = std&stdMask == stdFracSecond9
+	)
+	u := nanosec
+	var buf [9]byte
+	for start := len(buf); start > 0; {
+		start--
+		buf[start] = byte(u%10 + '0')
+		u /= 10
 	}
-	dot := separator(std)
-	b = append(b, dot)
-	b = appendInt(b, nanosec, 9)
-	if n < 9 {
-		b = b[:len(b)-9+n]
+
+	if n > 9 {
+		n = 9
 	}
 	if trim {
-		for len(b) > 0 && b[len(b)-1] == '0' {
-			b = b[:len(b)-1]
+		for n > 0 && buf[n-1] == '0' {
+			n--
 		}
-		if len(b) > 0 && b[len(b)-1] == dot {
-			b = b[:len(b)-1]
+		if n == 0 {
+			return b
 		}
 	}
-	return b
+	b = append(b, separator)
+	return append(b, buf[:n]...)
 }
 
 // String returns the time formatted using the format string
@@ -556,29 +537,26 @@ func (t Time) String() string {
 // GoString implements fmt.GoStringer and formats t to be printed in Go source
 // code.
 func (t Time) GoString() string {
-	abs := t.abs()
-	year, month, day, _ := absDate(abs, true)
-	hour, minute, second := absClock(abs)
-
-	buf := make([]byte, 0, len("time.Date(9999, time.September, 31, 23, 59, 59, 999999999, time.Local)"))
+	buf := make([]byte, 0, 70)
 	buf = append(buf, "time.Date("...)
-	buf = appendInt(buf, year, 0)
+	buf = appendInt(buf, t.Year(), 0)
+	month := t.Month()
 	if January <= month && month <= December {
 		buf = append(buf, ", time."...)
-		buf = append(buf, longMonthNames[month-1]...)
+		buf = append(buf, t.Month().String()...)
 	} else {
 		// It's difficult to construct a time.Time with a date outside the
 		// standard range but we might as well try to handle the case.
 		buf = appendInt(buf, int(month), 0)
 	}
 	buf = append(buf, ", "...)
-	buf = appendInt(buf, day, 0)
+	buf = appendInt(buf, t.Day(), 0)
 	buf = append(buf, ", "...)
-	buf = appendInt(buf, hour, 0)
+	buf = appendInt(buf, t.Hour(), 0)
 	buf = append(buf, ", "...)
-	buf = appendInt(buf, minute, 0)
+	buf = appendInt(buf, t.Minute(), 0)
 	buf = append(buf, ", "...)
-	buf = appendInt(buf, second, 0)
+	buf = appendInt(buf, t.Second(), 0)
 	buf = append(buf, ", "...)
 	buf = appendInt(buf, t.Nanosecond(), 0)
 	buf = append(buf, ", "...)
@@ -604,8 +582,8 @@ func (t Time) GoString() string {
 		// Of these, Location(loc.name) is the least disruptive. This is an edge
 		// case we hope not to hit too often.
 		buf = append(buf, `time.Location(`...)
-		buf = append(buf, quote(loc.name)...)
-		buf = append(buf, ')')
+		buf = append(buf, []byte(quote(loc.name))...)
+		buf = append(buf, `)`...)
 	}
 	buf = append(buf, ')')
 	return string(buf)
@@ -634,18 +612,6 @@ func (t Time) Format(layout string) string {
 // AppendFormat is like Format but appends the textual
 // representation to b and returns the extended buffer.
 func (t Time) AppendFormat(b []byte, layout string) []byte {
-	// Optimize for RFC3339 as it accounts for over half of all representations.
-	switch layout {
-	case RFC3339:
-		return t.appendFormatRFC3339(b, false)
-	case RFC3339Nano:
-		return t.appendFormatRFC3339(b, true)
-	default:
-		return t.appendFormat(b, layout)
-	}
-}
-
-func (t Time) appendFormat(b []byte, layout string) []byte {
 	var (
 		name, offset, abs = t.locabs()
 
@@ -657,7 +623,6 @@ func (t Time) appendFormat(b []byte, layout string) []byte {
 		min   int
 		sec   int
 	)
-
 	// Each iteration generates one std value.
 	for layout != "" {
 		prefix, std, suffix := nextStdChunk(layout)
@@ -807,7 +772,7 @@ func (t Time) appendFormat(b []byte, layout string) []byte {
 			b = appendInt(b, zone/60, 2)
 			b = appendInt(b, zone%60, 2)
 		case stdFracSecond0, stdFracSecond9:
-			b = appendNano(b, t.Nanosecond(), std)
+			b = formatNano(b, uint(t.Nanosecond()), std)
 		}
 	}
 	return b
@@ -822,20 +787,6 @@ type ParseError struct {
 	LayoutElem string
 	ValueElem  string
 	Message    string
-}
-
-// newParseError creates a new ParseError.
-// The provided value and valueElem are cloned to avoid escaping their values.
-func newParseError(layout, value, layoutElem, valueElem, message string) *ParseError {
-	valueCopy := cloneString(value)
-	valueElemCopy := cloneString(valueElem)
-	return &ParseError{layout, valueCopy, layoutElem, valueElemCopy, message}
-}
-
-// cloneString returns a string copy of s.
-// Do not use strings.Clone to avoid dependency on strings package.
-func cloneString(s string) string {
-	return string([]byte(s))
 }
 
 // These are borrowed from unicode/utf8 and strconv and replicate behavior in
@@ -896,7 +847,7 @@ func (e *ParseError) Error() string {
 }
 
 // isDigit reports whether s[i] is in range and is a decimal digit.
-func isDigit[bytes []byte | string](s bytes, i int) bool {
+func isDigit(s string, i int) bool {
 	if len(s) <= i {
 		return false
 	}
@@ -1005,12 +956,6 @@ func skip(value, prefix string) (string, error) {
 // differ by the actual zone offset. To avoid such problems, prefer time layouts
 // that use a numeric zone offset, or use ParseInLocation.
 func Parse(layout, value string) (Time, error) {
-	// Optimize for RFC3339 as it accounts for over half of all representations.
-	if layout == RFC3339 || layout == RFC3339Nano {
-		if t, ok := parseRFC3339(value, Local); ok {
-			return t, nil
-		}
-	}
 	return parse(layout, value, UTC, Local)
 }
 
@@ -1020,12 +965,6 @@ func Parse(layout, value string) (Time, error) {
 // Second, when given a zone offset or abbreviation, Parse tries to match it
 // against the Local location; ParseInLocation uses the given location.
 func ParseInLocation(layout, value string, loc *Location) (Time, error) {
-	// Optimize for RFC3339 as it accounts for over half of all representations.
-	if layout == RFC3339 || layout == RFC3339Nano {
-		if t, ok := parseRFC3339(value, loc); ok {
-			return t, nil
-		}
-	}
 	return parse(layout, value, loc, loc)
 }
 
@@ -1057,29 +996,28 @@ func parse(layout, value string, defaultLocation, local *Location) (Time, error)
 		stdstr := layout[len(prefix) : len(layout)-len(suffix)]
 		value, err = skip(value, prefix)
 		if err != nil {
-			return Time{}, newParseError(alayout, avalue, prefix, value, "")
+			return Time{}, &ParseError{alayout, avalue, prefix, value, ""}
 		}
 		if std == 0 {
 			if len(value) != 0 {
-				return Time{}, newParseError(alayout, avalue, "", value, ": extra text: "+quote(value))
+				return Time{}, &ParseError{alayout, avalue, "", value, ": extra text: " + quote(value)}
 			}
 			break
 		}
 		layout = suffix
 		var p string
-		hold := value
 		switch std & stdMask {
 		case stdYear:
 			if len(value) < 2 {
 				err = errBad
 				break
 			}
+			hold := value
 			p, value = value[0:2], value[2:]
 			year, err = atoi(p)
 			if err != nil {
-				break
-			}
-			if year >= 69 { // Unix time starts Dec 31 1969 in some time zones
+				value = hold
+			} else if year >= 69 { // Unix time starts Dec 31 1969 in some time zones
 				year += 1900
 			} else {
 				year += 2000
@@ -1140,9 +1078,6 @@ func parse(layout, value string, defaultLocation, local *Location) (Time, error)
 			}
 		case stdSecond, stdZeroSecond:
 			sec, value, err = getnum(value, std == stdZeroSecond)
-			if err != nil {
-				break
-			}
 			if sec < 0 || 60 <= sec {
 				rangeErrString = "second"
 				break
@@ -1238,12 +1173,12 @@ func parse(layout, value string, defaultLocation, local *Location) (Time, error)
 				sign, hour, min, seconds, value = value[0:1], value[1:3], value[3:5], "00", value[5:]
 			}
 			var hr, mm, ss int
-			hr, _, err = getnum(hour, true)
+			hr, err = atoi(hour)
 			if err == nil {
-				mm, _, err = getnum(min, true)
+				mm, err = atoi(min)
 			}
 			if err == nil {
-				ss, _, err = getnum(seconds, true)
+				ss, err = atoi(seconds)
 			}
 			zoneOffset = (hr*60+mm)*60 + ss // offset is in seconds
 			switch sign[0] {
@@ -1286,17 +1221,17 @@ func parse(layout, value string, defaultLocation, local *Location) (Time, error)
 			// Take any number of digits, even more than asked for,
 			// because it is what the stdSecond case would do.
 			i := 0
-			for i+1 < len(value) && '0' <= value[i+1] && value[i+1] <= '9' {
+			for i < 9 && i+1 < len(value) && '0' <= value[i+1] && value[i+1] <= '9' {
 				i++
 			}
 			nsec, rangeErrString, err = parseNanoseconds(value, 1+i)
 			value = value[1+i:]
 		}
 		if rangeErrString != "" {
-			return Time{}, newParseError(alayout, avalue, stdstr, value, ": "+rangeErrString+" out of range")
+			return Time{}, &ParseError{alayout, avalue, stdstr, value, ": " + rangeErrString + " out of range"}
 		}
 		if err != nil {
-			return Time{}, newParseError(alayout, avalue, stdstr, hold, "")
+			return Time{}, &ParseError{alayout, avalue, stdstr, value, ""}
 		}
 	}
 	if pmSet && hour < 12 {
@@ -1318,7 +1253,7 @@ func parse(layout, value string, defaultLocation, local *Location) (Time, error)
 			}
 		}
 		if yday < 1 || yday > 365 {
-			return Time{}, newParseError(alayout, avalue, "", value, ": day-of-year out of range")
+			return Time{}, &ParseError{alayout, avalue, "", value, ": day-of-year out of range"}
 		}
 		if m == 0 {
 			m = (yday-1)/31 + 1
@@ -1330,11 +1265,11 @@ func parse(layout, value string, defaultLocation, local *Location) (Time, error)
 		// If month, day already seen, yday's m, d must match.
 		// Otherwise, set them from m, d.
 		if month >= 0 && month != m {
-			return Time{}, newParseError(alayout, avalue, "", value, ": day-of-year does not match month")
+			return Time{}, &ParseError{alayout, avalue, "", value, ": day-of-year does not match month"}
 		}
 		month = m
 		if day >= 0 && day != d {
-			return Time{}, newParseError(alayout, avalue, "", value, ": day-of-year does not match day")
+			return Time{}, &ParseError{alayout, avalue, "", value, ": day-of-year does not match day"}
 		}
 		day = d
 	} else {
@@ -1348,7 +1283,7 @@ func parse(layout, value string, defaultLocation, local *Location) (Time, error)
 
 	// Validate the day of the month.
 	if day < 1 || day > daysIn(Month(month), year) {
-		return Time{}, newParseError(alayout, avalue, "", value, ": day out of range")
+		return Time{}, &ParseError{alayout, avalue, "", value, ": day out of range"}
 	}
 
 	if z != nil {
@@ -1368,8 +1303,7 @@ func parse(layout, value string, defaultLocation, local *Location) (Time, error)
 		}
 
 		// Otherwise create fake zone to record offset.
-		zoneNameCopy := cloneString(zoneName) // avoid leaking the input value
-		t.setLoc(FixedZone(zoneNameCopy, zoneOffset))
+		t.setLoc(FixedZone(zoneName, zoneOffset))
 		return t, nil
 	}
 
@@ -1389,8 +1323,7 @@ func parse(layout, value string, defaultLocation, local *Location) (Time, error)
 			offset, _ = atoi(zoneName[3:]) // Guaranteed OK by parseGMT.
 			offset *= 3600
 		}
-		zoneNameCopy := cloneString(zoneName) // avoid leaking the input value
-		t.setLoc(FixedZone(zoneNameCopy, offset))
+		t.setLoc(FixedZone(zoneName, offset))
 		return t, nil
 	}
 
@@ -1469,7 +1402,7 @@ func parseGMT(value string) int {
 
 // parseSignedOffset parses a signed timezone offset (e.g. "+03" or "-04").
 // The function checks for a signed number in the range -23 through +23 excluding zero.
-// Returns length of the found offset string or 0 otherwise.
+// Returns length of the found offset string or 0 otherwise
 func parseSignedOffset(value string) int {
 	sign := value[0]
 	if sign != '-' && sign != '+' {
@@ -1491,7 +1424,7 @@ func commaOrPeriod(b byte) bool {
 	return b == '.' || b == ','
 }
 
-func parseNanoseconds[bytes []byte | string](value bytes, nbytes int) (ns int, rangeErrString string, err error) {
+func parseNanoseconds(value string, nbytes int) (ns int, rangeErrString string, err error) {
 	if !commaOrPeriod(value[0]) {
 		err = errBad
 		return
@@ -1519,7 +1452,7 @@ func parseNanoseconds[bytes []byte | string](value bytes, nbytes int) (ns int, r
 var errLeadingInt = errors.New("time: bad [0-9]*") // never printed
 
 // leadingInt consumes the leading [0-9]* from s.
-func leadingInt[bytes []byte | string](s bytes) (x uint64, rem bytes, err error) {
+func leadingInt(s string) (x uint64, rem string, err error) {
 	i := 0
 	for ; i < len(s); i++ {
 		c := s[i]
@@ -1528,12 +1461,12 @@ func leadingInt[bytes []byte | string](s bytes) (x uint64, rem bytes, err error)
 		}
 		if x > 1<<63/10 {
 			// overflow
-			return 0, rem, errLeadingInt
+			return 0, "", errLeadingInt
 		}
 		x = x*10 + uint64(c) - '0'
 		if x > 1<<63 {
 			// overflow
-			return 0, rem, errLeadingInt
+			return 0, "", errLeadingInt
 		}
 	}
 	return x, s[i:], nil

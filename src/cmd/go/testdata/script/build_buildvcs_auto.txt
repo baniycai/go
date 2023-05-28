@@ -2,7 +2,7 @@
 # not attempt to stamp VCS information when the VCS tool is not present.
 
 [short] skip
-[!git] skip
+[!exec:git] skip
 
 cd sub
 exec git init .

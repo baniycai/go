@@ -10,42 +10,8 @@
 #include "go_tls.h"
 #include "textflag.h"
 
-#define CLOCK_REALTIME		0
-#define CLOCK_MONOTONIC		4
-
-#define SYS_exit		1
-#define SYS_read		3
-#define SYS_write		4
-#define SYS_open		5
-#define SYS_close		6
-#define SYS_getpid		20
-#define SYS_kill		37
-#define SYS_sigaltstack		53
-#define SYS_munmap		73
-#define SYS_madvise		75
-#define SYS_setitimer		83
-#define SYS_fcntl		92
-#define SYS_sysarch		165
-#define SYS___sysctl		202
-#define SYS_clock_gettime	232
-#define SYS_nanosleep		240
-#define SYS_sched_yield		331
-#define SYS_sigprocmask		340
-#define SYS_kqueue		362
-#define SYS_sigaction		416
-#define SYS_sigreturn		417
-#define SYS_thr_exit		431
-#define SYS_thr_self		432
-#define SYS_thr_kill		433
-#define SYS__umtx_op		454
-#define SYS_thr_new		455
-#define SYS_mmap		477
-#define SYS_cpuset_getaffinity	487
-#define SYS_pipe2 		542
-#define SYS_kevent		560
-
 TEXT runtime·sys_umtx_op(SB),NOSPLIT,$-4
-	MOVL	$SYS__umtx_op, AX
+	MOVL	$454, AX
 	INT	$0x80
 	JAE	2(PC)
 	NEGL	AX
@@ -53,7 +19,7 @@ TEXT runtime·sys_umtx_op(SB),NOSPLIT,$-4
 	RET
 
 TEXT runtime·thr_new(SB),NOSPLIT,$-4
-	MOVL	$SYS_thr_new, AX
+	MOVL	$455, AX
 	INT	$0x80
 	JAE	2(PC)
 	NEGL	AX
@@ -88,7 +54,7 @@ TEXT runtime·thr_start(SB),NOSPLIT,$0
 
 // Exit the entire program (like C exit)
 TEXT runtime·exit(SB),NOSPLIT,$-4
-	MOVL	$SYS_exit, AX
+	MOVL	$1, AX
 	INT	$0x80
 	MOVL	$0xf1, 0xf1  // crash
 	RET
@@ -106,13 +72,13 @@ TEXT runtime·exitThread(SB),NOSPLIT,$0-4
 	// on the stack. We want to pass 0, so switch over to a fake
 	// stack of 0s. It won't write to the stack.
 	MOVL	$exitStack<>(SB), SP
-	MOVL	$SYS_thr_exit, AX
+	MOVL	$431, AX	// thr_exit
 	INT	$0x80
 	MOVL	$0xf1, 0xf1  // crash
 	JMP	0(PC)
 
 TEXT runtime·open(SB),NOSPLIT,$-4
-	MOVL	$SYS_open, AX
+	MOVL	$5, AX
 	INT	$0x80
 	JAE	2(PC)
 	MOVL	$-1, AX
@@ -120,7 +86,7 @@ TEXT runtime·open(SB),NOSPLIT,$-4
 	RET
 
 TEXT runtime·closefd(SB),NOSPLIT,$-4
-	MOVL	$SYS_close, AX
+	MOVL	$6, AX
 	INT	$0x80
 	JAE	2(PC)
 	MOVL	$-1, AX
@@ -128,7 +94,7 @@ TEXT runtime·closefd(SB),NOSPLIT,$-4
 	RET
 
 TEXT runtime·read(SB),NOSPLIT,$-4
-	MOVL	$SYS_read, AX
+	MOVL	$3, AX
 	INT	$0x80
 	JAE	2(PC)
 	NEGL	AX			// caller expects negative errno
@@ -137,7 +103,7 @@ TEXT runtime·read(SB),NOSPLIT,$-4
 
 // func pipe2(flags int32) (r, w int32, errno int32)
 TEXT runtime·pipe2(SB),NOSPLIT,$12-16
-	MOVL	$SYS_pipe2, AX
+	MOVL	$542, AX
 	LEAL	r+4(FP), BX
 	MOVL	BX, 4(SP)
 	MOVL	flags+0(FP), BX
@@ -149,7 +115,7 @@ TEXT runtime·pipe2(SB),NOSPLIT,$12-16
 	RET
 
 TEXT runtime·write1(SB),NOSPLIT,$-4
-	MOVL	$SYS_write, AX
+	MOVL	$4, AX
 	INT	$0x80
 	JAE	2(PC)
 	NEGL	AX			// caller expects negative errno
@@ -160,25 +126,25 @@ TEXT runtime·thr_self(SB),NOSPLIT,$8-4
 	// thr_self(&0(FP))
 	LEAL	ret+0(FP), AX
 	MOVL	AX, 4(SP)
-	MOVL	$SYS_thr_self, AX
+	MOVL	$432, AX
 	INT	$0x80
 	RET
 
 TEXT runtime·thr_kill(SB),NOSPLIT,$-4
 	// thr_kill(tid, sig)
-	MOVL	$SYS_thr_kill, AX
+	MOVL	$433, AX
 	INT	$0x80
 	RET
 
 TEXT runtime·raiseproc(SB),NOSPLIT,$16
 	// getpid
-	MOVL	$SYS_getpid, AX
+	MOVL	$20, AX
 	INT	$0x80
 	// kill(self, sig)
 	MOVL	AX, 4(SP)
 	MOVL	sig+0(FP), AX
 	MOVL	AX, 8(SP)
-	MOVL	$SYS_kill, AX
+	MOVL	$37, AX
 	INT	$0x80
 	RET
 
@@ -194,7 +160,7 @@ TEXT runtime·mmap(SB),NOSPLIT,$32
 	MOVSL
 	MOVL	$0, AX	// top 32 bits of file offset
 	STOSL
-	MOVL	$SYS_mmap, AX
+	MOVL	$477, AX
 	INT	$0x80
 	JAE	ok
 	MOVL	$0, p+24(FP)
@@ -206,14 +172,14 @@ ok:
 	RET
 
 TEXT runtime·munmap(SB),NOSPLIT,$-4
-	MOVL	$SYS_munmap, AX
+	MOVL	$73, AX
 	INT	$0x80
 	JAE	2(PC)
 	MOVL	$0xf1, 0xf1  // crash
 	RET
 
 TEXT runtime·madvise(SB),NOSPLIT,$-4
-	MOVL	$SYS_madvise, AX
+	MOVL	$75, AX	// madvise
 	INT	$0x80
 	JAE	2(PC)
 	MOVL	$-1, AX
@@ -221,15 +187,15 @@ TEXT runtime·madvise(SB),NOSPLIT,$-4
 	RET
 
 TEXT runtime·setitimer(SB), NOSPLIT, $-4
-	MOVL	$SYS_setitimer, AX
+	MOVL	$83, AX
 	INT	$0x80
 	RET
 
 // func fallback_walltime() (sec int64, nsec int32)
 TEXT runtime·fallback_walltime(SB), NOSPLIT, $32-12
-	MOVL	$SYS_clock_gettime, AX
+	MOVL	$232, AX // clock_gettime
 	LEAL	12(SP), BX
-	MOVL	$CLOCK_REALTIME, 4(SP)
+	MOVL	$0, 4(SP)	// CLOCK_REALTIME
 	MOVL	BX, 8(SP)
 	INT	$0x80
 	MOVL	12(SP), AX	// sec
@@ -243,9 +209,9 @@ TEXT runtime·fallback_walltime(SB), NOSPLIT, $32-12
 
 // func fallback_nanotime() int64
 TEXT runtime·fallback_nanotime(SB), NOSPLIT, $32-8
-	MOVL	$SYS_clock_gettime, AX
+	MOVL	$232, AX
 	LEAL	12(SP), BX
-	MOVL	$CLOCK_MONOTONIC, 4(SP)
+	MOVL	$4, 4(SP)	// CLOCK_MONOTONIC
 	MOVL	BX, 8(SP)
 	INT	$0x80
 	MOVL	12(SP), AX	// sec
@@ -264,7 +230,7 @@ TEXT runtime·fallback_nanotime(SB), NOSPLIT, $32-8
 
 
 TEXT runtime·asmSigaction(SB),NOSPLIT,$-4
-	MOVL	$SYS_sigaction, AX
+	MOVL	$416, AX
 	INT	$0x80
 	MOVL	AX, ret+12(FP)
 	RET
@@ -301,13 +267,13 @@ TEXT runtime·sigtramp(SB),NOSPLIT|TOPFRAME,$12
 	MOVL	24(SP), AX	// context
 	MOVL	$0, 0(SP)	// syscall gap
 	MOVL	AX, 4(SP)
-	MOVL	$SYS_sigreturn, AX
+	MOVL	$417, AX	// sigreturn(ucontext)
 	INT	$0x80
 	MOVL	$0xf1, 0xf1  // crash
 	RET
 
 TEXT runtime·sigaltstack(SB),NOSPLIT,$0
-	MOVL	$SYS_sigaltstack, AX
+	MOVL	$53, AX
 	INT	$0x80
 	JAE	2(PC)
 	MOVL	$0xf1, 0xf1  // crash
@@ -327,7 +293,7 @@ TEXT runtime·usleep(SB),NOSPLIT,$20
 	LEAL	12(SP), AX
 	MOVL	AX, 4(SP)		// arg 1 - rqtp
 	MOVL	$0, 8(SP)		// arg 2 - rmtp
-	MOVL	$SYS_nanosleep, AX
+	MOVL	$240, AX		// sys_nanosleep
 	INT	$0x80
 	RET
 
@@ -386,7 +352,7 @@ TEXT i386_set_ldt<>(SB),NOSPLIT,$16
 	MOVL	$0, 0(SP)	// syscall gap
 	MOVL	$1, 4(SP)
 	MOVL	AX, 8(SP)
-	MOVL	$SYS_sysarch, AX
+	MOVL	$165, AX
 	INT	$0x80
 	JAE	2(PC)
 	INT	$3
@@ -402,7 +368,7 @@ TEXT runtime·sysctl(SB),NOSPLIT,$28
 	MOVSL				// arg 4 - oldlenp
 	MOVSL				// arg 5 - newp
 	MOVSL				// arg 6 - newlen
-	MOVL	$SYS___sysctl, AX
+	MOVL	$202, AX		// sys___sysctl
 	INT	$0x80
 	JAE	4(PC)
 	NEGL	AX
@@ -413,7 +379,7 @@ TEXT runtime·sysctl(SB),NOSPLIT,$28
 	RET
 
 TEXT runtime·osyield(SB),NOSPLIT,$-4
-	MOVL	$SYS_sched_yield, AX
+	MOVL	$331, AX		// sys_sched_yield
 	INT	$0x80
 	RET
 
@@ -425,7 +391,7 @@ TEXT runtime·sigprocmask(SB),NOSPLIT,$16
 	MOVL	AX, 8(SP)		// arg 2 - set
 	MOVL	old+8(FP), AX
 	MOVL	AX, 12(SP)		// arg 3 - oset
-	MOVL	$SYS_sigprocmask, AX
+	MOVL	$340, AX		// sys_sigprocmask
 	INT	$0x80
 	JAE	2(PC)
 	MOVL	$0xf1, 0xf1  // crash
@@ -433,7 +399,7 @@ TEXT runtime·sigprocmask(SB),NOSPLIT,$16
 
 // int32 runtime·kqueue(void);
 TEXT runtime·kqueue(SB),NOSPLIT,$0
-	MOVL	$SYS_kqueue, AX
+	MOVL	$362, AX
 	INT	$0x80
 	JAE	2(PC)
 	NEGL	AX
@@ -442,29 +408,29 @@ TEXT runtime·kqueue(SB),NOSPLIT,$0
 
 // int32 runtime·kevent(int kq, Kevent *changelist, int nchanges, Kevent *eventlist, int nevents, Timespec *timeout);
 TEXT runtime·kevent(SB),NOSPLIT,$0
-	MOVL	$SYS_kevent, AX
+	MOVL	$363, AX
 	INT	$0x80
 	JAE	2(PC)
 	NEGL	AX
 	MOVL	AX, ret+24(FP)
 	RET
 
-// func fcntl(fd, cmd, arg int32) (int32, int32)
-TEXT runtime·fcntl(SB),NOSPLIT,$-4
-	MOVL	$SYS_fcntl, AX
+// int32 runtime·closeonexec(int32 fd);
+TEXT runtime·closeonexec(SB),NOSPLIT,$32
+	MOVL	$92, AX		// fcntl
+	// 0(SP) is where the caller PC would be; kernel skips it
+	MOVL	fd+0(FP), BX
+	MOVL	BX, 4(SP)	// fd
+	MOVL	$2, 8(SP)	// F_SETFD
+	MOVL	$1, 12(SP)	// FD_CLOEXEC
 	INT	$0x80
-	JAE	noerr
-	MOVL	$-1, ret+12(FP)
-	MOVL	AX, errno+16(FP)
-	RET
-noerr:
-	MOVL	AX, ret+12(FP)
-	MOVL	$0, errno+16(FP)
+	JAE	2(PC)
+	NEGL	AX
 	RET
 
 // func cpuset_getaffinity(level int, which int, id int64, size int, mask *byte) int32
 TEXT runtime·cpuset_getaffinity(SB), NOSPLIT, $0-28
-	MOVL	$SYS_cpuset_getaffinity, AX
+	MOVL	$487, AX
 	INT	$0x80
 	JAE	2(PC)
 	NEGL	AX

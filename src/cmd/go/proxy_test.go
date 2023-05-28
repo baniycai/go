@@ -105,7 +105,7 @@ func readModList() {
 	}
 }
 
-var zipCache par.ErrCache[*txtar.Archive, []byte]
+var zipCache par.Cache
 
 const (
 	testSumDBName        = "localhost.localdev/sumdb"
@@ -353,7 +353,11 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case "zip":
-		zipBytes, err := zipCache.Do(a, func() ([]byte, error) {
+		type cached struct {
+			zip []byte
+			err error
+		}
+		c := zipCache.Do(a, func() any {
 			var buf bytes.Buffer
 			z := zip.NewWriter(&buf)
 			for _, f := range a.Files {
@@ -368,26 +372,26 @@ func proxyHandler(w http.ResponseWriter, r *http.Request) {
 				}
 				zf, err := z.Create(zipName)
 				if err != nil {
-					return nil, err
+					return cached{nil, err}
 				}
 				if _, err := zf.Write(f.Data); err != nil {
-					return nil, err
+					return cached{nil, err}
 				}
 			}
 			if err := z.Close(); err != nil {
-				return nil, err
+				return cached{nil, err}
 			}
-			return buf.Bytes(), nil
-		})
+			return cached{buf.Bytes(), nil}
+		}).(cached)
 
-		if err != nil {
+		if c.err != nil {
 			if testing.Verbose() {
-				fmt.Fprintf(os.Stderr, "go proxy: %v\n", err)
+				fmt.Fprintf(os.Stderr, "go proxy: %v\n", c.err)
 			}
-			http.Error(w, err.Error(), 500)
+			http.Error(w, c.err.Error(), 500)
 			return
 		}
-		w.Write(zipBytes)
+		w.Write(c.zip)
 		return
 
 	}
@@ -411,7 +415,7 @@ func findHash(m module.Version) string {
 	return info.Short
 }
 
-var archiveCache par.Cache[string, *txtar.Archive]
+var archiveCache par.Cache
 
 var cmdGoDir, _ = os.Getwd()
 
@@ -427,7 +431,7 @@ func readArchive(path, vers string) (*txtar.Archive, error) {
 
 	prefix := strings.ReplaceAll(enc, "/", "_")
 	name := filepath.Join(cmdGoDir, "testdata/mod", prefix+"_"+encVers+".txt")
-	a := archiveCache.Do(name, func() *txtar.Archive {
+	a := archiveCache.Do(name, func() any {
 		a, err := txtar.ParseFile(name)
 		if err != nil {
 			if testing.Verbose() || !os.IsNotExist(err) {
@@ -436,7 +440,7 @@ func readArchive(path, vers string) (*txtar.Archive, error) {
 			a = nil
 		}
 		return a
-	})
+	}).(*txtar.Archive)
 	if a == nil {
 		return nil, fs.ErrNotExist
 	}

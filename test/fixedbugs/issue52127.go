@@ -1,6 +1,6 @@
 // run
-//go:build !js && !wasip1
-// +build !js,!wasip1
+//go:build !js
+// +build !js
 
 // Copyright 2022 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style

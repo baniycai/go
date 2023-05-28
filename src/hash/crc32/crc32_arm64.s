@@ -12,21 +12,18 @@ TEXT ·castagnoliUpdate(SB),NOSPLIT,$0-36
 	MOVD	p+8(FP), R13  // data pointer
 	MOVD	p_len+16(FP), R11  // len(p)
 
+	CMP	$8, R11
+	BLT	less_than_8
+
 update:
-	CMP	$16, R11
-	BLT	less_than_16
-	LDP.P	16(R13), (R8, R10)
-	CRC32CX	R8, R9
-	CRC32CX	R10, R9
-	SUB	$16, R11
-
-	JMP	update
-
-less_than_16:
-	TBZ	$3, R11, less_than_8
-
 	MOVD.P	8(R13), R10
 	CRC32CX	R10, R9
+	SUB	$8, R11
+
+	CMP	$8, R11
+	BLT	less_than_8
+
+	JMP	update
 
 less_than_8:
 	TBZ	$2, R11, less_than_4
@@ -58,21 +55,18 @@ TEXT ·ieeeUpdate(SB),NOSPLIT,$0-36
 	MOVD	p+8(FP), R13  // data pointer
 	MOVD	p_len+16(FP), R11  // len(p)
 
+	CMP	$8, R11
+	BLT	less_than_8
+
 update:
-	CMP	$16, R11
-	BLT	less_than_16
-	LDP.P	16(R13), (R8, R10)
-	CRC32X	R8, R9
-	CRC32X	R10, R9
-	SUB	$16, R11
-
-	JMP	update
-
-less_than_16:
-	TBZ $3, R11, less_than_8
-
 	MOVD.P	8(R13), R10
 	CRC32X	R10, R9
+	SUB	$8, R11
+
+	CMP	$8, R11
+	BLT	less_than_8
+
+	JMP	update
 
 less_than_8:
 	TBZ	$2, R11, less_than_4

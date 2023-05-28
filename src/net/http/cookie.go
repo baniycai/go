@@ -73,7 +73,6 @@ func readSetCookies(h Header) []*Cookie {
 		if !ok {
 			continue
 		}
-		name = textproto.TrimString(name)
 		if !isCookieNameValid(name) {
 			continue
 		}
@@ -247,7 +246,7 @@ func (c *Cookie) Valid() error {
 	if !isCookieNameValid(c.Name) {
 		return errors.New("http: invalid Cookie.Name")
 	}
-	if !c.Expires.IsZero() && !validCookieExpires(c.Expires) {
+	if !validCookieExpires(c.Expires) {
 		return errors.New("http: invalid Cookie.Expires")
 	}
 	for i := 0; i < len(c.Value); i++ {
@@ -273,7 +272,7 @@ func (c *Cookie) Valid() error {
 // readCookies parses all "Cookie" values from the header h and
 // returns the successfully parsed Cookies.
 //
-// if filter isn't empty, only cookies of that name are returned.
+// if filter isn't empty, only cookies of that name are returned
 func readCookies(h Header, filter string) []*Cookie {
 	lines := h["Cookie"]
 	if len(lines) == 0 {
@@ -292,7 +291,6 @@ func readCookies(h Header, filter string) []*Cookie {
 				continue
 			}
 			name, val, _ := strings.Cut(part, "=")
-			name = textproto.TrimString(name)
 			if !isCookieNameValid(name) {
 				continue
 			}

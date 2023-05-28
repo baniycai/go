@@ -5,7 +5,6 @@
 package runtime
 
 import (
-	"internal/abi"
 	"internal/cpu"
 	"internal/goarch"
 	"unsafe"
@@ -101,12 +100,12 @@ func interhash(p unsafe.Pointer, h uintptr) uintptr {
 		return h
 	}
 	t := tab._type
-	if t.Equal == nil {
+	if t.equal == nil {
 		// Check hashability here. We could do this check inside
 		// typehash, but we want to report the topmost type in
 		// the error text (e.g. in a struct with a field of slice type
 		// we want to report the struct, not the slice).
-		panic(errorString("hash of unhashable type " + toRType(t).string()))
+		panic(errorString("hash of unhashable type " + t.string()))
 	}
 	if isDirectIface(t) {
 		return c1 * typehash(t, unsafe.Pointer(&a.data), h^c0)
@@ -121,9 +120,9 @@ func nilinterhash(p unsafe.Pointer, h uintptr) uintptr {
 	if t == nil {
 		return h
 	}
-	if t.Equal == nil {
+	if t.equal == nil {
 		// See comment in interhash above.
-		panic(errorString("hash of unhashable type " + toRType(t).string()))
+		panic(errorString("hash of unhashable type " + t.string()))
 	}
 	if isDirectIface(t) {
 		return c1 * typehash(t, unsafe.Pointer(&a.data), h^c0)
@@ -143,18 +142,18 @@ func nilinterhash(p unsafe.Pointer, h uintptr) uintptr {
 // Note: this function must match the compiler generated
 // functions exactly. See issue 37716.
 func typehash(t *_type, p unsafe.Pointer, h uintptr) uintptr {
-	if t.TFlag&abi.TFlagRegularMemory != 0 {
+	if t.tflag&tflagRegularMemory != 0 {
 		// Handle ptr sizes specially, see issue 37086.
-		switch t.Size_ {
+		switch t.size {
 		case 4:
 			return memhash32(p, h)
 		case 8:
 			return memhash64(p, h)
 		default:
-			return memhash(p, h, t.Size_)
+			return memhash(p, h, t.size)
 		}
 	}
-	switch t.Kind_ & kindMask {
+	switch t.kind & kindMask {
 	case kindFloat32:
 		return f32hash(p, h)
 	case kindFloat64:
@@ -167,29 +166,29 @@ func typehash(t *_type, p unsafe.Pointer, h uintptr) uintptr {
 		return strhash(p, h)
 	case kindInterface:
 		i := (*interfacetype)(unsafe.Pointer(t))
-		if len(i.Methods) == 0 {
+		if len(i.mhdr) == 0 {
 			return nilinterhash(p, h)
 		}
 		return interhash(p, h)
 	case kindArray:
 		a := (*arraytype)(unsafe.Pointer(t))
-		for i := uintptr(0); i < a.Len; i++ {
-			h = typehash(a.Elem, add(p, i*a.Elem.Size_), h)
+		for i := uintptr(0); i < a.len; i++ {
+			h = typehash(a.elem, add(p, i*a.elem.size), h)
 		}
 		return h
 	case kindStruct:
 		s := (*structtype)(unsafe.Pointer(t))
-		for _, f := range s.Fields {
-			if f.Name.IsBlank() {
+		for _, f := range s.fields {
+			if f.name.isBlank() {
 				continue
 			}
-			h = typehash(f.Typ, add(p, f.Offset), h)
+			h = typehash(f.typ, add(p, f.offset), h)
 		}
 		return h
 	default:
 		// Should never happen, as typehash should only be called
 		// with comparable types.
-		panic(errorString("hash of unhashable type " + toRType(t).string()))
+		panic(errorString("hash of unhashable type " + t.string()))
 	}
 }
 
@@ -245,9 +244,9 @@ func efaceeq(t *_type, x, y unsafe.Pointer) bool {
 	if t == nil {
 		return true
 	}
-	eq := t.Equal
+	eq := t.equal
 	if eq == nil {
-		panic(errorString("comparing uncomparable type " + toRType(t).string()))
+		panic(errorString("comparing uncomparable type " + t.string()))
 	}
 	if isDirectIface(t) {
 		// Direct interface types are ptr, chan, map, func, and single-element structs/arrays thereof.
@@ -262,9 +261,9 @@ func ifaceeq(tab *itab, x, y unsafe.Pointer) bool {
 		return true
 	}
 	t := tab._type
-	eq := t.Equal
+	eq := t.equal
 	if eq == nil {
-		panic(errorString("comparing uncomparable type " + toRType(t).string()))
+		panic(errorString("comparing uncomparable type " + t.string()))
 	}
 	if isDirectIface(t) {
 		// See comment in efaceeq.

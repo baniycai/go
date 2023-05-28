@@ -1,4 +1,4 @@
-[compiler:gccgo] skip
+[gccgo] skip
 
 # If coverpkg=m/sleepy... expands by package loading
 # (as opposed to pattern matching on deps)

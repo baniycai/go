@@ -7,13 +7,14 @@ package comment
 import (
 	"internal/diff"
 	"internal/testenv"
+	"os/exec"
 	"sort"
 	"strings"
 	"testing"
 )
 
 func TestStd(t *testing.T) {
-	out, err := testenv.Command(t, testenv.GoToolPath(t), "list", "std").CombinedOutput()
+	out, err := exec.Command(testenv.GoToolPath(t), "list", "std").CombinedOutput()
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}

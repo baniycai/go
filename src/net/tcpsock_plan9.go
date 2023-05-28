@@ -42,7 +42,7 @@ func (sd *sysDialer) doDialTCP(ctx context.Context, laddr, raddr *TCPAddr) (*TCP
 	if err != nil {
 		return nil, err
 	}
-	return newTCPConn(fd, sd.Dialer.KeepAlive, testHookSetKeepAlive), nil
+	return newTCPConn(fd), nil
 }
 
 func (ln *TCPListener) ok() bool { return ln != nil && ln.fd != nil && ln.fd.ctl != nil }
@@ -52,7 +52,16 @@ func (ln *TCPListener) accept() (*TCPConn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newTCPConn(fd, ln.lc.KeepAlive, nil), nil
+	tc := newTCPConn(fd)
+	if ln.lc.KeepAlive >= 0 {
+		setKeepAlive(fd, true)
+		ka := ln.lc.KeepAlive
+		if ln.lc.KeepAlive == 0 {
+			ka = defaultTCPKeepAlive
+		}
+		setKeepAlivePeriod(fd, ka)
+	}
+	return tc, nil
 }
 
 func (ln *TCPListener) close() error {

@@ -1,6 +1,5 @@
+// +build !nacl,!386,!wasm,!arm,!gcflags_noopt
 // errorcheck -0 -m
-
-//go:build !nacl && !386 && !wasm && !arm && !gcflags_noopt
 
 // Copyright 2019 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
@@ -36,18 +35,19 @@ func small6() { // ERROR "can inline small6"
 var once *sync.Once
 
 func small7() { // ERROR "can inline small7"
-	// the Do fast path should be inlined
-	once.Do(small5) // ERROR "inlining call to sync\.\(\*Once\)\.Do"
+        // the Do fast path should be inlined
+        once.Do(small5) // ERROR "inlining call to sync\.\(\*Once\)\.Do"
 }
 
 var rwmutex *sync.RWMutex
 
 func small8() { // ERROR "can inline small8"
-	// the RUnlock fast path should be inlined
-	rwmutex.RUnlock() // ERROR "inlining call to sync\.\(\*RWMutex\)\.RUnlock" "inlining call to atomic\.\(\*Int32\)\.Add"
+        // the RUnlock fast path should be inlined
+        rwmutex.RUnlock() // ERROR "inlining call to sync\.\(\*RWMutex\)\.RUnlock"
 }
 
 func small9() { // ERROR "can inline small9"
-	// the RLock fast path should be inlined
-	rwmutex.RLock() // ERROR "inlining call to sync\.\(\*RWMutex\)\.RLock" "inlining call to atomic\.\(\*Int32\)\.Add"
+        // the RLock fast path should be inlined
+        rwmutex.RLock() // ERROR "inlining call to sync\.\(\*RWMutex\)\.RLock"
 }
+

@@ -40,7 +40,7 @@ type Name struct {
 	flags     bitset16
 	DictIndex uint16 // index of the dictionary entry describing the type of this variable declaration plus 1
 	sym       *types.Sym
-	Func      *Func // TODO(austin): nil for I.M
+	Func      *Func // TODO(austin): nil for I.M, eqFor, hashfor, and hashmem
 	Offset_   int64
 	val       constant.Value
 	Opt       interface{} // for use by escape analysis
@@ -134,10 +134,9 @@ type Name struct {
 
 func (n *Name) isExpr() {}
 
-func (n *Name) copy() Node                                  { panic(n.no("copy")) }
-func (n *Name) doChildren(do func(Node) bool) bool          { return false }
-func (n *Name) editChildren(edit func(Node) Node)           {}
-func (n *Name) editChildrenWithHidden(edit func(Node) Node) {}
+func (n *Name) copy() Node                         { panic(n.no("copy")) }
+func (n *Name) doChildren(do func(Node) bool) bool { return false }
+func (n *Name) editChildren(edit func(Node) Node)  {}
 
 // RecordFrameOffset records the frame offset for the name.
 // It is used by package types when laying out function arguments.
@@ -237,8 +236,6 @@ const (
 	nameInlLocal                 // PAUTO created by inliner, derived from callee local
 	nameOpenDeferSlot            // if temporary var storing info for open-coded defers
 	nameLibfuzzer8BitCounter     // if PEXTERN should be assigned to __sancov_cntrs section
-	nameCoverageCounter          // instrumentation counter var for cmd/cover
-	nameCoverageAuxVar           // instrumentation pkg ID variable cmd/cover
 	nameAlias                    // is type name an alias
 )
 
@@ -254,8 +251,6 @@ func (n *Name) InlFormal() bool                { return n.flags&nameInlFormal !=
 func (n *Name) InlLocal() bool                 { return n.flags&nameInlLocal != 0 }
 func (n *Name) OpenDeferSlot() bool            { return n.flags&nameOpenDeferSlot != 0 }
 func (n *Name) Libfuzzer8BitCounter() bool     { return n.flags&nameLibfuzzer8BitCounter != 0 }
-func (n *Name) CoverageCounter() bool          { return n.flags&nameCoverageCounter != 0 }
-func (n *Name) CoverageAuxVar() bool           { return n.flags&nameCoverageAuxVar != 0 }
 
 func (n *Name) setReadonly(b bool)                 { n.flags.set(nameReadonly, b) }
 func (n *Name) SetNeedzero(b bool)                 { n.flags.set(nameNeedzero, b) }
@@ -269,8 +264,6 @@ func (n *Name) SetInlFormal(b bool)                { n.flags.set(nameInlFormal, 
 func (n *Name) SetInlLocal(b bool)                 { n.flags.set(nameInlLocal, b) }
 func (n *Name) SetOpenDeferSlot(b bool)            { n.flags.set(nameOpenDeferSlot, b) }
 func (n *Name) SetLibfuzzer8BitCounter(b bool)     { n.flags.set(nameLibfuzzer8BitCounter, b) }
-func (n *Name) SetCoverageCounter(b bool)          { n.flags.set(nameCoverageCounter, b) }
-func (n *Name) SetCoverageAuxVar(b bool)           { n.flags.set(nameCoverageAuxVar, b) }
 
 // OnStack reports whether variable n may reside on the stack.
 func (n *Name) OnStack() bool {
@@ -343,14 +336,6 @@ func (n *Name) Byval() bool {
 // NewClosureVar returns a new closure variable for fn to refer to
 // outer variable n.
 func NewClosureVar(pos src.XPos, fn *Func, n *Name) *Name {
-	switch n.Class {
-	case PAUTO, PPARAM, PPARAMOUT, PAUTOHEAP:
-		// ok
-	default:
-		// Prevent mistaken capture of global variables.
-		base.Fatalf("NewClosureVar: %+v", n)
-	}
-
 	c := NewNameAt(pos, n.Sym())
 	c.Curfn = fn
 	c.Class = PAUTOHEAP

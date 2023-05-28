@@ -46,7 +46,7 @@ func libcCall(fn, arg unsafe.Pointer) int32 {
 		// profile signal, which is the one that uses the libcall* info.
 		mp = nil
 	}
-	res := asmcgocall(fn, arg)
+	res := asmcgocall(fn, arg) // NOTE 通过汇编来调用c代码
 	if mp != nil {
 		mp.libcallsp = 0
 	}

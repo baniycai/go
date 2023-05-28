@@ -5,6 +5,7 @@
 package ssa
 
 import (
+	"cmd/internal/src"
 	"math"
 )
 
@@ -85,7 +86,7 @@ func (s *biasedSparseMap) add(x uint) {
 	if int(x) < s.first || int(x) >= s.cap() {
 		return
 	}
-	s.s.set(ID(int(x)-s.first), 0)
+	s.s.set(ID(int(x)-s.first), 0, src.NoXPos)
 }
 
 // add inserts x->v into s, provided that x is in the range of keys stored in s.
@@ -93,7 +94,7 @@ func (s *biasedSparseMap) set(x uint, v int32) {
 	if int(x) < s.first || int(x) >= s.cap() {
 		return
 	}
-	s.s.set(ID(int(x)-s.first), v)
+	s.s.set(ID(int(x)-s.first), v, src.NoXPos)
 }
 
 // remove removes key x from s.

@@ -5,12 +5,10 @@
 package textproto
 
 import (
-	"bufio"
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
-	"math"
+	"std/bufio"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,7 +17,15 @@ import (
 // A Reader implements convenience methods for reading requests
 // or responses from a text protocol network connection.
 type Reader struct {
-	R   *bufio.Reader
+	R *bufio.Reader
+	// todo 待确定
+	// 在某些文本协议中，点号被用作特殊字符，因此需要进行转义处理以避免歧义。
+	//举例来说，在 SMTP 协议中，“.”单独出现在一行时，表示邮件正文的结束。
+	//为了避免邮件内容中恰好出现了“.”单独一行的情况，SMTP 协议使用了点号转义机制，即将连续的两个点号转换为一个点号。
+	//当我们使用 textproto.Reader 读取 SMTP 协议数据时，如果直接按照普通的方式读取每一行数据，在遇到“.”单独一行时可能会引起解析错误。
+	//而使用 dotReader 结构体则可以自动处理点号转义机制，确保解析出正确的协议数据
+	// 如果邮件内容中恰好出现了一个点号（“.”）单独一行，SMTP 协议规定需要将其转义为两个点号（“..”）。
+	//这意味着，在读取这一行数据时，dotReader 会将连续的两个点号（“..”）转换回单个点号（“.”）
 	dot *dotReader
 	buf []byte // a re-usable buffer for readContinuedLineSlice
 }
@@ -44,11 +50,14 @@ func (r *Reader) ReadLine() (string, error) {
 func (r *Reader) ReadLineBytes() ([]byte, error) {
 	line, err := r.readLineSlice()
 	if line != nil {
-		line = bytes.Clone(line)
+		buf := make([]byte, len(line))
+		copy(buf, line)
+		line = buf
 	}
 	return line, err
 }
 
+// 读取完整的一行
 func (r *Reader) readLineSlice() ([]byte, error) {
 	r.closeDot()
 	var line []byte
@@ -111,7 +120,9 @@ func trim(s []byte) []byte {
 func (r *Reader) ReadContinuedLineBytes() ([]byte, error) {
 	line, err := r.readContinuedLineSlice(noValidation)
 	if line != nil {
-		line = bytes.Clone(line)
+		buf := make([]byte, len(line))
+		copy(buf, line)
+		line = buf
 	}
 	return line, err
 }
@@ -479,31 +490,16 @@ var colon = []byte(":")
 //		"Long-Key": {"Even Longer Value"},
 //	}
 func (r *Reader) ReadMIMEHeader() (MIMEHeader, error) {
-	return readMIMEHeader(r, math.MaxInt64, math.MaxInt64)
-}
-
-// readMIMEHeader is a version of ReadMIMEHeader which takes a limit on the header size.
-// It is called by the mime/multipart package.
-func readMIMEHeader(r *Reader, maxMemory, maxHeaders int64) (MIMEHeader, error) {
 	// Avoid lots of small slice allocations later by allocating one
 	// large one ahead of time which we'll cut up into smaller
 	// slices. If this isn't big enough later, we allocate small ones.
 	var strs []string
-	hint := r.upcomingHeaderKeys()
+	hint := r.upcomingHeaderNewlines()
 	if hint > 0 {
-		if hint > 1000 {
-			hint = 1000 // set a cap to avoid overallocation
-		}
 		strs = make([]string, hint)
 	}
 
 	m := make(MIMEHeader, hint)
-
-	// Account for 400 bytes of overhead for the MIMEHeader, plus 200 bytes per entry.
-	// Benchmarking map creation as of go1.20, a one-entry MIMEHeader is 416 bytes and large
-	// MIMEHeaders average about 200 bytes per entry.
-	maxMemory -= 400
-	const mapEntryOverhead = 200
 
 	// The first line cannot start with a leading space.
 	if buf, err := r.R.Peek(1); err == nil && (buf[0] == ' ' || buf[0] == '\t') {
@@ -525,15 +521,7 @@ func readMIMEHeader(r *Reader, maxMemory, maxHeaders int64) (MIMEHeader, error) 
 		if !ok {
 			return m, ProtocolError("malformed MIME header line: " + string(kv))
 		}
-		key, ok := canonicalMIMEHeaderKey(k)
-		if !ok {
-			return m, ProtocolError("malformed MIME header line: " + string(kv))
-		}
-		for _, c := range v {
-			if !validHeaderValueByte(c) {
-				return m, ProtocolError("malformed MIME header line: " + string(kv))
-			}
-		}
+		key := canonicalMIMEHeaderKey(k)
 
 		// As per RFC 7230 field-name is a token, tokens consist of one or more chars.
 		// We could return a ProtocolError here, but better to be liberal in what we
@@ -542,25 +530,10 @@ func readMIMEHeader(r *Reader, maxMemory, maxHeaders int64) (MIMEHeader, error) 
 			continue
 		}
 
-		maxHeaders--
-		if maxHeaders < 0 {
-			return nil, errors.New("message too large")
-		}
-
 		// Skip initial spaces in value.
-		value := string(bytes.TrimLeft(v, " \t"))
+		value := strings.TrimLeft(string(v), " \t")
 
 		vv := m[key]
-		if vv == nil {
-			maxMemory -= int64(len(key))
-			maxMemory -= mapEntryOverhead
-		}
-		maxMemory -= int64(len(value))
-		if maxMemory < 0 {
-			// TODO: This should be a distinguishable error (ErrMessageTooLarge)
-			// to allow mime/multipart to detect it.
-			return m, errors.New("message too large")
-		}
 		if vv == nil && len(strs) > 0 {
 			// More than likely this will be a single-element key.
 			// Most headers aren't multi-valued.
@@ -595,9 +568,9 @@ func mustHaveFieldNameColon(line []byte) error {
 
 var nl = []byte("\n")
 
-// upcomingHeaderKeys returns an approximation of the number of keys
+// upcomingHeaderNewlines returns an approximation of the number of newlines
 // that will be in this header. If it gets confused, it returns 0.
-func (r *Reader) upcomingHeaderKeys() (n int) {
+func (r *Reader) upcomingHeaderNewlines() (n int) {
 	// Try to determine the 'hint' size.
 	r.R.Peek(1) // force a buffer load if empty
 	s := r.R.Buffered()
@@ -605,20 +578,7 @@ func (r *Reader) upcomingHeaderKeys() (n int) {
 		return
 	}
 	peek, _ := r.R.Peek(s)
-	for len(peek) > 0 && n < 1000 {
-		var line []byte
-		line, peek, _ = bytes.Cut(peek, nl)
-		if len(line) == 0 || (len(line) == 1 && line[0] == '\r') {
-			// Blank line separating headers from the body.
-			break
-		}
-		if line[0] == ' ' || line[0] == '\t' {
-			// Folded continuation of the previous line.
-			continue
-		}
-		n++
-	}
-	return n
+	return bytes.Count(peek, nl)
 }
 
 // CanonicalMIMEHeaderKey returns the canonical format of the
@@ -638,12 +598,10 @@ func CanonicalMIMEHeaderKey(s string) string {
 			return s
 		}
 		if upper && 'a' <= c && c <= 'z' {
-			s, _ = canonicalMIMEHeaderKey([]byte(s))
-			return s
+			return canonicalMIMEHeaderKey([]byte(s))
 		}
 		if !upper && 'A' <= c && c <= 'Z' {
-			s, _ = canonicalMIMEHeaderKey([]byte(s))
-			return s
+			return canonicalMIMEHeaderKey([]byte(s))
 		}
 		upper = c == '-'
 	}
@@ -652,7 +610,7 @@ func CanonicalMIMEHeaderKey(s string) string {
 
 const toLower = 'a' - 'A'
 
-// validHeaderFieldByte reports whether c is a valid byte in a header
+// validHeaderFieldByte reports whether b is a valid byte in a header
 // field name. RFC 7230 says:
 //
 //	header-field   = field-name ":" OWS field-value OWS
@@ -660,58 +618,8 @@ const toLower = 'a' - 'A'
 //	tchar = "!" / "#" / "$" / "%" / "&" / "'" / "*" / "+" / "-" / "." /
 //	        "^" / "_" / "`" / "|" / "~" / DIGIT / ALPHA
 //	token = 1*tchar
-func validHeaderFieldByte(c byte) bool {
-	// mask is a 128-bit bitmap with 1s for allowed bytes,
-	// so that the byte c can be tested with a shift and an and.
-	// If c >= 128, then 1<<c and 1<<(c-64) will both be zero,
-	// and this function will return false.
-	const mask = 0 |
-		(1<<(10)-1)<<'0' |
-		(1<<(26)-1)<<'a' |
-		(1<<(26)-1)<<'A' |
-		1<<'!' |
-		1<<'#' |
-		1<<'$' |
-		1<<'%' |
-		1<<'&' |
-		1<<'\'' |
-		1<<'*' |
-		1<<'+' |
-		1<<'-' |
-		1<<'.' |
-		1<<'^' |
-		1<<'_' |
-		1<<'`' |
-		1<<'|' |
-		1<<'~'
-	return ((uint64(1)<<c)&(mask&(1<<64-1)) |
-		(uint64(1)<<(c-64))&(mask>>64)) != 0
-}
-
-// validHeaderValueByte reports whether c is a valid byte in a header
-// field value. RFC 7230 says:
-//
-//	field-content  = field-vchar [ 1*( SP / HTAB ) field-vchar ]
-//	field-vchar    = VCHAR / obs-text
-//	obs-text       = %x80-FF
-//
-// RFC 5234 says:
-//
-//	HTAB           =  %x09
-//	SP             =  %x20
-//	VCHAR          =  %x21-7E
-func validHeaderValueByte(c byte) bool {
-	// mask is a 128-bit bitmap with 1s for allowed bytes,
-	// so that the byte c can be tested with a shift and an and.
-	// If c >= 128, then 1<<c and 1<<(c-64) will both be zero.
-	// Since this is the obs-text range, we invert the mask to
-	// create a bitmap with 1s for disallowed bytes.
-	const mask = 0 |
-		(1<<(0x7f-0x21)-1)<<0x21 | // VCHAR: %x21-7E
-		1<<0x20 | // SP: %x20
-		1<<0x09 // HTAB: %x09
-	return ((uint64(1)<<c)&^(mask&(1<<64-1)) |
-		(uint64(1)<<(c-64))&^(mask>>64)) == 0
+func validHeaderFieldByte(b byte) bool {
+	return int(b) < len(isTokenTable) && isTokenTable[b]
 }
 
 // canonicalMIMEHeaderKey is like CanonicalMIMEHeaderKey but is
@@ -720,29 +628,14 @@ func validHeaderValueByte(c byte) bool {
 //
 // For invalid inputs (if a contains spaces or non-token bytes), a
 // is unchanged and a string copy is returned.
-//
-// ok is true if the header key contains only valid characters and spaces.
-// ReadMIMEHeader accepts header keys containing spaces, but does not
-// canonicalize them.
-func canonicalMIMEHeaderKey(a []byte) (_ string, ok bool) {
+func canonicalMIMEHeaderKey(a []byte) string {
 	// See if a looks like a header key. If not, return it unchanged.
-	noCanon := false
 	for _, c := range a {
 		if validHeaderFieldByte(c) {
 			continue
 		}
 		// Don't canonicalize.
-		if c == ' ' {
-			// We accept invalid headers with a space before the
-			// colon, but must not canonicalize them.
-			// See https://go.dev/issue/34540.
-			noCanon = true
-			continue
-		}
-		return string(a), false
-	}
-	if noCanon {
-		return string(a), true
+		return string(a)
 	}
 
 	upper := true
@@ -764,9 +657,9 @@ func canonicalMIMEHeaderKey(a []byte) (_ string, ok bool) {
 	// case, so a copy of a's bytes into a new string does not
 	// happen in this map lookup:
 	if v := commonHeader[string(a)]; v != "" {
-		return v, true
+		return v
 	}
-	return string(a), true
+	return string(a)
 }
 
 // commonHeader interns common header strings.
@@ -819,4 +712,86 @@ func initCommonHeader() {
 	} {
 		commonHeader[v] = v
 	}
+}
+
+// isTokenTable is a copy of net/http/lex.go's isTokenTable.
+// See https://httpwg.github.io/specs/rfc7230.html#rule.token.separators
+var isTokenTable = [127]bool{
+	'!':  true,
+	'#':  true,
+	'$':  true,
+	'%':  true,
+	'&':  true,
+	'\'': true,
+	'*':  true,
+	'+':  true,
+	'-':  true,
+	'.':  true,
+	'0':  true,
+	'1':  true,
+	'2':  true,
+	'3':  true,
+	'4':  true,
+	'5':  true,
+	'6':  true,
+	'7':  true,
+	'8':  true,
+	'9':  true,
+	'A':  true,
+	'B':  true,
+	'C':  true,
+	'D':  true,
+	'E':  true,
+	'F':  true,
+	'G':  true,
+	'H':  true,
+	'I':  true,
+	'J':  true,
+	'K':  true,
+	'L':  true,
+	'M':  true,
+	'N':  true,
+	'O':  true,
+	'P':  true,
+	'Q':  true,
+	'R':  true,
+	'S':  true,
+	'T':  true,
+	'U':  true,
+	'W':  true,
+	'V':  true,
+	'X':  true,
+	'Y':  true,
+	'Z':  true,
+	'^':  true,
+	'_':  true,
+	'`':  true,
+	'a':  true,
+	'b':  true,
+	'c':  true,
+	'd':  true,
+	'e':  true,
+	'f':  true,
+	'g':  true,
+	'h':  true,
+	'i':  true,
+	'j':  true,
+	'k':  true,
+	'l':  true,
+	'm':  true,
+	'n':  true,
+	'o':  true,
+	'p':  true,
+	'q':  true,
+	'r':  true,
+	's':  true,
+	't':  true,
+	'u':  true,
+	'v':  true,
+	'w':  true,
+	'x':  true,
+	'y':  true,
+	'z':  true,
+	'|':  true,
+	'~':  true,
 }

@@ -7,10 +7,7 @@
 
 package lif
 
-import (
-	"syscall"
-	"unsafe"
-)
+import "unsafe"
 
 // A Link represents logical data link information.
 //
@@ -33,22 +30,22 @@ func (ll *Link) fetch(s uintptr) {
 	for i := 0; i < len(ll.Name); i++ {
 		lifr.Name[i] = int8(ll.Name[i])
 	}
-	ioc := int64(syscall.SIOCGLIFINDEX)
+	ioc := int64(sysSIOCGLIFINDEX)
 	if err := ioctl(s, uintptr(ioc), unsafe.Pointer(&lifr)); err == nil {
 		ll.Index = int(nativeEndian.Uint32(lifr.Lifru[:4]))
 	}
-	ioc = int64(syscall.SIOCGLIFFLAGS)
+	ioc = int64(sysSIOCGLIFFLAGS)
 	if err := ioctl(s, uintptr(ioc), unsafe.Pointer(&lifr)); err == nil {
 		ll.Flags = int(nativeEndian.Uint64(lifr.Lifru[:8]))
 	}
-	ioc = int64(syscall.SIOCGLIFMTU)
+	ioc = int64(sysSIOCGLIFMTU)
 	if err := ioctl(s, uintptr(ioc), unsafe.Pointer(&lifr)); err == nil {
 		ll.MTU = int(nativeEndian.Uint32(lifr.Lifru[:4]))
 	}
 	switch ll.Type {
-	case syscall.IFT_IPV4, syscall.IFT_IPV6, syscall.IFT_6TO4:
+	case sysIFT_IPV4, sysIFT_IPV6, sysIFT_6TO4:
 	default:
-		ioc = int64(syscall.SIOCGLIFHWADDR)
+		ioc = int64(sysSIOCGLIFHWADDR)
 		if err := ioctl(s, uintptr(ioc), unsafe.Pointer(&lifr)); err == nil {
 			ll.Addr, _ = parseLinkAddr(lifr.Lifru[4:])
 		}
@@ -78,7 +75,7 @@ func links(eps []endpoint, name string) ([]Link, error) {
 	lifc := lifconf{Flags: sysLIFC_NOXMIT | sysLIFC_TEMPORARY | sysLIFC_ALLZONES | sysLIFC_UNDER_IPMP}
 	for _, ep := range eps {
 		lifn.Family = uint16(ep.af)
-		ioc := int64(syscall.SIOCGLIFNUM)
+		ioc := int64(sysSIOCGLIFNUM)
 		if err := ioctl(ep.s, uintptr(ioc), unsafe.Pointer(&lifn)); err != nil {
 			continue
 		}
@@ -93,7 +90,7 @@ func links(eps []endpoint, name string) ([]Link, error) {
 		} else {
 			nativeEndian.PutUint32(lifc.Lifcu[:], uint32(uintptr(unsafe.Pointer(&b[0]))))
 		}
-		ioc = int64(syscall.SIOCGLIFCONF)
+		ioc = int64(sysSIOCGLIFCONF)
 		if err := ioctl(ep.s, uintptr(ioc), unsafe.Pointer(&lifc)); err != nil {
 			continue
 		}

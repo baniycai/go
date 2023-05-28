@@ -453,14 +453,15 @@ var ErrNoRows = errors.New("sql: no rows in result set")
 // connection is returned to DB's idle connection pool. The pool size
 // can be controlled with SetMaxIdleConns.
 type DB struct {
-	// Total time waited for new connections.
-	waitDuration atomic.Int64
+	// Atomic access only. At top of struct to prevent mis-alignment
+	// on 32-bit platforms. Of type time.Duration.
+	waitDuration int64 // Total time waited for new connections.
 
 	connector driver.Connector
 	// numClosed is an atomic counter which represents a total number of
 	// closed connections. Stmt.openStmt checks it before cleaning closed
 	// connections in Stmt.css.
-	numClosed atomic.Uint64
+	numClosed uint64
 
 	mu           sync.Mutex    // protects following fields
 	freeConn     []*driverConn // free connections ordered by returnedAt oldest to newest
@@ -650,7 +651,7 @@ func (dc *driverConn) finalClose() error {
 	dc.db.maybeOpenNewConnections()
 	dc.db.mu.Unlock()
 
-	dc.db.numClosed.Add(1)
+	atomic.AddUint64(&dc.db.numClosed, 1)
 	return err
 }
 
@@ -845,12 +846,17 @@ func (db *DB) pingDC(ctx context.Context, dc *driverConn, release func(error)) e
 func (db *DB) PingContext(ctx context.Context) error {
 	var dc *driverConn
 	var err error
-
-	err = db.retry(func(strategy connReuseStrategy) error {
-		dc, err = db.conn(ctx, strategy)
-		return err
-	})
-
+	var isBadConn bool
+	for i := 0; i < maxBadConnRetries; i++ {
+		dc, err = db.conn(ctx, cachedOrNewConn)
+		isBadConn = errors.Is(err, driver.ErrBadConn)
+		if !isBadConn {
+			break
+		}
+	}
+	if isBadConn {
+		dc, err = db.conn(ctx, alwaysNewConn)
+	}
 	if err != nil {
 		return err
 	}
@@ -1170,7 +1176,7 @@ type DBStats struct {
 
 // Stats returns database statistics.
 func (db *DB) Stats() DBStats {
-	wait := db.waitDuration.Load()
+	wait := atomic.LoadInt64(&db.waitDuration)
 
 	db.mu.Lock()
 	defer db.mu.Unlock()
@@ -1340,7 +1346,7 @@ func (db *DB) conn(ctx context.Context, strategy connReuseStrategy) (*driverConn
 			delete(db.connRequests, reqKey)
 			db.mu.Unlock()
 
-			db.waitDuration.Add(int64(time.Since(waitStart)))
+			atomic.AddInt64(&db.waitDuration, int64(time.Since(waitStart)))
 
 			select {
 			default:
@@ -1351,7 +1357,7 @@ func (db *DB) conn(ctx context.Context, strategy connReuseStrategy) (*driverConn
 			}
 			return nil, ctx.Err()
 		case ret, ok := <-req:
-			db.waitDuration.Add(int64(time.Since(waitStart)))
+			atomic.AddInt64(&db.waitDuration, int64(time.Since(waitStart)))
 
 			if !ok {
 				return nil, errDBClosed
@@ -1533,18 +1539,6 @@ func (db *DB) putConnDBLocked(dc *driverConn, err error) bool {
 // connection to be opened.
 const maxBadConnRetries = 2
 
-func (db *DB) retry(fn func(strategy connReuseStrategy) error) error {
-	for i := int64(0); i < maxBadConnRetries; i++ {
-		err := fn(cachedOrNewConn)
-		// retry if err is driver.ErrBadConn
-		if err == nil || !errors.Is(err, driver.ErrBadConn) {
-			return err
-		}
-	}
-
-	return fn(alwaysNewConn)
-}
-
 // PrepareContext creates a prepared statement for later queries or executions.
 // Multiple queries or executions may be run concurrently from the
 // returned statement.
@@ -1556,12 +1550,17 @@ func (db *DB) retry(fn func(strategy connReuseStrategy) error) error {
 func (db *DB) PrepareContext(ctx context.Context, query string) (*Stmt, error) {
 	var stmt *Stmt
 	var err error
-
-	err = db.retry(func(strategy connReuseStrategy) error {
-		stmt, err = db.prepare(ctx, query, strategy)
-		return err
-	})
-
+	var isBadConn bool
+	for i := 0; i < maxBadConnRetries; i++ {
+		stmt, err = db.prepare(ctx, query, cachedOrNewConn)
+		isBadConn = errors.Is(err, driver.ErrBadConn)
+		if !isBadConn {
+			break
+		}
+	}
+	if isBadConn {
+		return db.prepare(ctx, query, alwaysNewConn)
+	}
 	return stmt, err
 }
 
@@ -1618,7 +1617,7 @@ func (db *DB) prepareDC(ctx context.Context, dc *driverConn, release func(error)
 	// the DB.
 	if cg == nil {
 		stmt.css = []connStmt{{dc, ds}}
-		stmt.lastNumClosed = db.numClosed.Load()
+		stmt.lastNumClosed = atomic.LoadUint64(&db.numClosed)
 		db.addDep(stmt, stmt)
 	}
 	return stmt, nil
@@ -1629,12 +1628,17 @@ func (db *DB) prepareDC(ctx context.Context, dc *driverConn, release func(error)
 func (db *DB) ExecContext(ctx context.Context, query string, args ...any) (Result, error) {
 	var res Result
 	var err error
-
-	err = db.retry(func(strategy connReuseStrategy) error {
-		res, err = db.exec(ctx, query, args, strategy)
-		return err
-	})
-
+	var isBadConn bool
+	for i := 0; i < maxBadConnRetries; i++ {
+		res, err = db.exec(ctx, query, args, cachedOrNewConn)
+		isBadConn = errors.Is(err, driver.ErrBadConn)
+		if !isBadConn {
+			break
+		}
+	}
+	if isBadConn {
+		return db.exec(ctx, query, args, alwaysNewConn)
+	}
 	return res, err
 }
 
@@ -1699,12 +1703,17 @@ func (db *DB) execDC(ctx context.Context, dc *driverConn, release func(error), q
 func (db *DB) QueryContext(ctx context.Context, query string, args ...any) (*Rows, error) {
 	var rows *Rows
 	var err error
-
-	err = db.retry(func(strategy connReuseStrategy) error {
-		rows, err = db.query(ctx, query, args, strategy)
-		return err
-	})
-
+	var isBadConn bool
+	for i := 0; i < maxBadConnRetries; i++ {
+		rows, err = db.query(ctx, query, args, cachedOrNewConn)
+		isBadConn = errors.Is(err, driver.ErrBadConn)
+		if !isBadConn {
+			break
+		}
+	}
+	if isBadConn {
+		return db.query(ctx, query, args, alwaysNewConn)
+	}
 	return rows, err
 }
 
@@ -1831,12 +1840,17 @@ func (db *DB) QueryRow(query string, args ...any) *Row {
 func (db *DB) BeginTx(ctx context.Context, opts *TxOptions) (*Tx, error) {
 	var tx *Tx
 	var err error
-
-	err = db.retry(func(strategy connReuseStrategy) error {
-		tx, err = db.begin(ctx, opts, strategy)
-		return err
-	})
-
+	var isBadConn bool
+	for i := 0; i < maxBadConnRetries; i++ {
+		tx, err = db.begin(ctx, opts, cachedOrNewConn)
+		isBadConn = errors.Is(err, driver.ErrBadConn)
+		if !isBadConn {
+			break
+		}
+	}
+	if isBadConn {
+		return db.begin(ctx, opts, alwaysNewConn)
+	}
 	return tx, err
 }
 
@@ -1907,12 +1921,17 @@ var ErrConnDone = errors.New("sql: connection is already closed")
 func (db *DB) Conn(ctx context.Context) (*Conn, error) {
 	var dc *driverConn
 	var err error
-
-	err = db.retry(func(strategy connReuseStrategy) error {
-		dc, err = db.conn(ctx, strategy)
-		return err
-	})
-
+	var isBadConn bool
+	for i := 0; i < maxBadConnRetries; i++ {
+		dc, err = db.conn(ctx, cachedOrNewConn)
+		isBadConn = errors.Is(err, driver.ErrBadConn)
+		if !isBadConn {
+			break
+		}
+	}
+	if isBadConn {
+		dc, err = db.conn(ctx, alwaysNewConn)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1947,27 +1966,20 @@ type Conn struct {
 	// it's returned to the connection pool.
 	dc *driverConn
 
-	// done transitions from false to true exactly once, on close.
+	// done transitions from 0 to 1 exactly once, on close.
 	// Once done, all operations fail with ErrConnDone.
-	done atomic.Bool
-
-	// releaseConn is a cache of c.closemuRUnlockCondReleaseConn
-	// to save allocations in a call to grabConn.
-	releaseConnOnce  sync.Once
-	releaseConnCache releaseConn
+	// Use atomic operations on value when checking value.
+	done int32
 }
 
 // grabConn takes a context to implement stmtConnGrabber
 // but the context is not used.
 func (c *Conn) grabConn(context.Context) (*driverConn, releaseConn, error) {
-	if c.done.Load() {
+	if atomic.LoadInt32(&c.done) != 0 {
 		return nil, nil, ErrConnDone
 	}
-	c.releaseConnOnce.Do(func() {
-		c.releaseConnCache = c.closemuRUnlockCondReleaseConn
-	})
 	c.closemu.RLock()
-	return c.dc, c.releaseConnCache, nil
+	return c.dc, c.closemuRUnlockCondReleaseConn, nil
 }
 
 // PingContext verifies the connection to the database is still alive.
@@ -2091,7 +2103,7 @@ func (c *Conn) txCtx() context.Context {
 }
 
 func (c *Conn) close(err error) error {
-	if !c.done.CompareAndSwap(false, true) {
+	if !atomic.CompareAndSwapInt32(&c.done, 0, 1) {
 		return ErrConnDone
 	}
 
@@ -2142,10 +2154,11 @@ type Tx struct {
 	// any held driverConn back to the pool.
 	releaseConn func(error)
 
-	// done transitions from false to true exactly once, on Commit
+	// done transitions from 0 to 1 exactly once, on Commit
 	// or Rollback. once done, all operations fail with
 	// ErrTxDone.
-	done atomic.Bool
+	// Use atomic operations on value when checking value.
+	done int32
 
 	// keepConnOnRollback is true if the driver knows
 	// how to reset the connection's session and if need be discard
@@ -2184,7 +2197,7 @@ func (tx *Tx) awaitDone() {
 }
 
 func (tx *Tx) isDone() bool {
-	return tx.done.Load()
+	return atomic.LoadInt32(&tx.done) != 0
 }
 
 // ErrTxDone is returned by any operation that is performed on a transaction
@@ -2253,12 +2266,12 @@ func (tx *Tx) Commit() error {
 	select {
 	default:
 	case <-tx.ctx.Done():
-		if tx.done.Load() {
+		if atomic.LoadInt32(&tx.done) == 1 {
 			return ErrTxDone
 		}
 		return tx.ctx.Err()
 	}
-	if !tx.done.CompareAndSwap(false, true) {
+	if !atomic.CompareAndSwapInt32(&tx.done, 0, 1) {
 		return ErrTxDone
 	}
 
@@ -2286,7 +2299,7 @@ var rollbackHook func()
 // rollback aborts the transaction and optionally forces the pool to discard
 // the connection.
 func (tx *Tx) rollback(discardConn bool) error {
-	if !tx.done.CompareAndSwap(false, true) {
+	if !atomic.CompareAndSwapInt32(&tx.done, 0, 1) {
 		return ErrTxDone
 	}
 
@@ -2607,18 +2620,26 @@ func (s *Stmt) ExecContext(ctx context.Context, args ...any) (Result, error) {
 	defer s.closemu.RUnlock()
 
 	var res Result
-	err := s.db.retry(func(strategy connReuseStrategy) error {
+	strategy := cachedOrNewConn
+	for i := 0; i < maxBadConnRetries+1; i++ {
+		if i == maxBadConnRetries {
+			strategy = alwaysNewConn
+		}
 		dc, releaseConn, ds, err := s.connStmt(ctx, strategy)
 		if err != nil {
-			return err
+			if errors.Is(err, driver.ErrBadConn) {
+				continue
+			}
+			return nil, err
 		}
 
 		res, err = resultFromStatement(ctx, dc.ci, ds, args...)
 		releaseConn(err)
-		return err
-	})
-
-	return res, err
+		if !errors.Is(err, driver.ErrBadConn) {
+			return res, err
+		}
+	}
+	return nil, driver.ErrBadConn
 }
 
 // Exec executes a prepared statement with the given arguments and
@@ -2655,7 +2676,7 @@ func (s *Stmt) removeClosedStmtLocked() {
 	if t > 10 {
 		t = 10
 	}
-	dbClosed := s.db.numClosed.Load()
+	dbClosed := atomic.LoadUint64(&s.db.numClosed)
 	if dbClosed-s.lastNumClosed < uint64(t) {
 		return
 	}
@@ -2747,19 +2768,24 @@ func (s *Stmt) QueryContext(ctx context.Context, args ...any) (*Rows, error) {
 	defer s.closemu.RUnlock()
 
 	var rowsi driver.Rows
-	var rows *Rows
-
-	err := s.db.retry(func(strategy connReuseStrategy) error {
+	strategy := cachedOrNewConn
+	for i := 0; i < maxBadConnRetries+1; i++ {
+		if i == maxBadConnRetries {
+			strategy = alwaysNewConn
+		}
 		dc, releaseConn, ds, err := s.connStmt(ctx, strategy)
 		if err != nil {
-			return err
+			if errors.Is(err, driver.ErrBadConn) {
+				continue
+			}
+			return nil, err
 		}
 
 		rowsi, err = rowsiFromStatement(ctx, dc.ci, ds, args...)
 		if err == nil {
 			// Note: ownership of ci passes to the *Rows, to be freed
 			// with releaseConn.
-			rows = &Rows{
+			rows := &Rows{
 				dc:    dc,
 				rowsi: rowsi,
 				// releaseConn set below
@@ -2779,14 +2805,15 @@ func (s *Stmt) QueryContext(ctx context.Context, args ...any) (*Rows, error) {
 				txctx = s.cg.txCtx()
 			}
 			rows.initContextClose(ctx, txctx)
-			return nil
+			return rows, nil
 		}
 
 		releaseConn(err)
-		return err
-	})
-
-	return rows, err
+		if !errors.Is(err, driver.ErrBadConn) {
+			return nil, err
+		}
+	}
+	return nil, driver.ErrBadConn
 }
 
 // Query executes a prepared query statement with the given arguments
@@ -2893,8 +2920,6 @@ type Rows struct {
 	cancel      func()      // called when Rows is closed, may be nil.
 	closeStmt   *driverStmt // if non-nil, statement to Close on close
 
-	contextDone atomic.Pointer[error] // error that awaitDone saw; set before close attempt
-
 	// closemu prevents Rows from closing while there
 	// is an active streaming result. It is held for read during non-close operations
 	// and exclusively during close.
@@ -2907,21 +2932,6 @@ type Rows struct {
 	// lastcols is only used in Scan, Next, and NextResultSet which are expected
 	// not to be called concurrently.
 	lastcols []driver.Value
-
-	// closemuScanHold is whether the previous call to Scan kept closemu RLock'ed
-	// without unlocking it. It does that when the user passes a *RawBytes scan
-	// target. In that case, we need to prevent awaitDone from closing the Rows
-	// while the user's still using the memory. See go.dev/issue/60304.
-	//
-	// It is only used by Scan, Next, and NextResultSet which are expected
-	// not to be called concurrently.
-	closemuScanHold bool
-
-	// hitEOF is whether Next hit the end of the rows without
-	// encountering an error. It's set in Next before
-	// returning. It's only used by Next and Err which are
-	// expected not to be called concurrently.
-	hitEOF bool
 }
 
 // lasterrOrErrLocked returns either lasterr or the provided err.
@@ -2959,11 +2969,7 @@ func (rs *Rows) awaitDone(ctx, txctx context.Context) {
 	}
 	select {
 	case <-ctx.Done():
-		err := ctx.Err()
-		rs.contextDone.Store(&err)
 	case <-txctxDone:
-		err := txctx.Err()
-		rs.contextDone.Store(&err)
 	}
 	rs.close(ctx.Err())
 }
@@ -2975,24 +2981,12 @@ func (rs *Rows) awaitDone(ctx, txctx context.Context) {
 //
 // Every call to Scan, even the first one, must be preceded by a call to Next.
 func (rs *Rows) Next() bool {
-	// If the user's calling Next, they're done with their previous row's Scan
-	// results (any RawBytes memory), so we can release the read lock that would
-	// be preventing awaitDone from calling close.
-	rs.closemuRUnlockIfHeldByScan()
-
-	if rs.contextDone.Load() != nil {
-		return false
-	}
-
 	var doClose, ok bool
 	withLock(rs.closemu.RLocker(), func() {
 		doClose, ok = rs.nextLocked()
 	})
 	if doClose {
 		rs.Close()
-	}
-	if doClose && !ok {
-		rs.hitEOF = true
 	}
 	return ok
 }
@@ -3041,11 +3035,6 @@ func (rs *Rows) nextLocked() (doClose, ok bool) {
 // scanning. If there are further result sets they may not have rows in the result
 // set.
 func (rs *Rows) NextResultSet() bool {
-	// If the user's calling NextResultSet, they're done with their previous
-	// row's Scan results (any RawBytes memory), so we can release the read lock
-	// that would be preventing awaitDone from calling close.
-	rs.closemuRUnlockIfHeldByScan()
-
 	var doClose bool
 	defer func() {
 		if doClose {
@@ -3082,16 +3071,6 @@ func (rs *Rows) NextResultSet() bool {
 // Err returns the error, if any, that was encountered during iteration.
 // Err may be called after an explicit or implicit Close.
 func (rs *Rows) Err() error {
-	// Return any context error that might've happened during row iteration,
-	// but only if we haven't reported the final Next() = false after rows
-	// are done, in which case the user might've canceled their own context
-	// before calling Rows.Err.
-	if !rs.hitEOF {
-		if errp := rs.contextDone.Load(); errp != nil {
-			return *errp
-		}
-	}
-
 	rs.closemu.RLock()
 	defer rs.closemu.RUnlock()
 	return rs.lasterrOrErrLocked(nil)
@@ -3283,13 +3262,8 @@ func rowsColumnInfoSetupConnLocked(rowsi driver.Rows) []*ColumnType {
 // select query will close any cursor *Rows if the parent *Rows is closed.
 //
 // If any of the first arguments implementing Scanner returns an error,
-// that error will be wrapped in the returned error.
+// that error will be wrapped in the returned error
 func (rs *Rows) Scan(dest ...any) error {
-	if rs.closemuScanHold {
-		// This should only be possible if the user calls Scan twice in a row
-		// without calling Next.
-		return fmt.Errorf("sql: Scan called without calling Next (closemuScanHold)")
-	}
 	rs.closemu.RLock()
 
 	if rs.lasterr != nil && rs.lasterr != io.EOF {
@@ -3301,48 +3275,21 @@ func (rs *Rows) Scan(dest ...any) error {
 		rs.closemu.RUnlock()
 		return err
 	}
-
-	if scanArgsContainRawBytes(dest) {
-		rs.closemuScanHold = true
-	} else {
-		rs.closemu.RUnlock()
-	}
+	rs.closemu.RUnlock()
 
 	if rs.lastcols == nil {
-		rs.closemuRUnlockIfHeldByScan()
 		return errors.New("sql: Scan called without calling Next")
 	}
 	if len(dest) != len(rs.lastcols) {
-		rs.closemuRUnlockIfHeldByScan()
 		return fmt.Errorf("sql: expected %d destination arguments in Scan, not %d", len(rs.lastcols), len(dest))
 	}
-
 	for i, sv := range rs.lastcols {
 		err := convertAssignRows(dest[i], sv, rs)
 		if err != nil {
-			rs.closemuRUnlockIfHeldByScan()
 			return fmt.Errorf(`sql: Scan error on column index %d, name %q: %w`, i, rs.rowsi.Columns()[i], err)
 		}
 	}
 	return nil
-}
-
-// closemuRUnlockIfHeldByScan releases any closemu.RLock held open by a previous
-// call to Scan with *RawBytes.
-func (rs *Rows) closemuRUnlockIfHeldByScan() {
-	if rs.closemuScanHold {
-		rs.closemuScanHold = false
-		rs.closemu.RUnlock()
-	}
-}
-
-func scanArgsContainRawBytes(args []any) bool {
-	for _, a := range args {
-		if _, ok := a.(*RawBytes); ok {
-			return true
-		}
-	}
-	return false
 }
 
 // rowsCloseHook returns a function so tests may install the
@@ -3354,11 +3301,6 @@ var rowsCloseHook = func() func(*Rows, *error) { return nil }
 // the Rows are closed automatically and it will suffice to check the
 // result of Err. Close is idempotent and does not affect the result of Err.
 func (rs *Rows) Close() error {
-	// If the user's calling Close, they're done with their previous row's Scan
-	// results (any RawBytes memory), so we can release the read lock that would
-	// be preventing awaitDone from calling the unexported close before we do so.
-	rs.closemuRUnlockIfHeldByScan()
-
 	return rs.close(nil)
 }
 

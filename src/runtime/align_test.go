@@ -5,6 +5,7 @@
 package runtime_test
 
 import (
+	"bytes"
 	"go/ast"
 	"go/build"
 	"go/importer"
@@ -12,7 +13,6 @@ import (
 	"go/printer"
 	"go/token"
 	"go/types"
-	"internal/testenv"
 	"os"
 	"regexp"
 	"runtime"
@@ -23,8 +23,6 @@ import (
 // Check that 64-bit fields on which we apply atomic operations
 // are aligned to 8 bytes. This can be a problem on 32-bit systems.
 func TestAtomicAlignment(t *testing.T) {
-	testenv.MustHaveGoBuild(t) // go command needed to resolve std .a files for importer.Default().
-
 	// Read the code making the tables above, to see which fields and
 	// variables we are currently checking.
 	checked := map[string]bool{}
@@ -47,7 +45,7 @@ func TestAtomicAlignment(t *testing.T) {
 		varDesc[i] = v[1]
 	}
 
-	// Check all of our alignments. This is the actual core of the test.
+	// Check all of our alignemnts. This is the actual core of the test.
 	for i, d := range runtime.AtomicFields {
 		if d%8 != 0 {
 			t.Errorf("field alignment of %s failed: offset is %d", fieldDesc[i], d)
@@ -182,7 +180,7 @@ func (v *Visitor) checkAddr(n ast.Node) {
 }
 
 func (v *Visitor) print(n ast.Node) string {
-	var b strings.Builder
+	var b bytes.Buffer
 	printer.Fprint(&b, v.fset, n)
 	return b.String()
 }

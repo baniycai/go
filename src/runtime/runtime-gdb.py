@@ -160,7 +160,6 @@ class MapTypePrinter:
 		return str(self.val.type)
 
 	def children(self):
-		MapBucketCount = 8 # see internal/abi.go:MapBucketCount
 		B = self.val['B']
 		buckets = self.val['buckets']
 		oldbuckets = self.val['oldbuckets']
@@ -179,7 +178,7 @@ class MapTypePrinter:
 					bp = oldbp
 			while bp:
 				b = bp.dereference()
-				for i in xrange(MapBucketCount):
+				for i in xrange(8):
 					if b['tophash'][i] != 0:
 						k = b['keys'][i]
 						v = b['values'][i]
@@ -325,7 +324,7 @@ def iface_dtype(obj):
 		return
 
 	type_size = int(dynamic_go_type['size'])
-	uintptr_size = int(dynamic_go_type['size'].type.sizeof)	 # size is itself a uintptr
+	uintptr_size = int(dynamic_go_type['size'].type.sizeof)	 # size is itself an uintptr
 	if type_size > uintptr_size:
 			dynamic_gdb_type = dynamic_gdb_type.pointer()
 
@@ -448,7 +447,7 @@ class GoroutinesCmd(gdb.Command):
 		# args = gdb.string_to_argv(arg)
 		vp = gdb.lookup_type('void').pointer()
 		for ptr in SliceValue(gdb.parse_and_eval("'runtime.allgs'")):
-			if ptr['atomicstatus']['value'] == G_DEAD:
+			if ptr['atomicstatus'] == G_DEAD:
 				continue
 			s = ' '
 			if ptr['m']:
@@ -456,7 +455,7 @@ class GoroutinesCmd(gdb.Command):
 			pc = ptr['sched']['pc'].cast(vp)
 			pc = pc_to_int(pc)
 			blk = gdb.block_for_pc(pc)
-			status = int(ptr['atomicstatus']['value'])
+			status = int(ptr['atomicstatus'])
 			st = sts.get(status, "unknown(%d)" % status)
 			print(s, ptr['goid'], "{0:8s}".format(st), blk.function)
 
@@ -473,7 +472,7 @@ def find_goroutine(goid):
 	"""
 	vp = gdb.lookup_type('void').pointer()
 	for ptr in SliceValue(gdb.parse_and_eval("'runtime.allgs'")):
-		if ptr['atomicstatus']['value'] == G_DEAD:
+		if ptr['atomicstatus'] == G_DEAD:
 			continue
 		if ptr['goid'] == goid:
 			break
@@ -481,7 +480,7 @@ def find_goroutine(goid):
 		return None, None
 	# Get the goroutine's saved state.
 	pc, sp = ptr['sched']['pc'], ptr['sched']['sp']
-	status = ptr['atomicstatus']['value']&~G_SCAN
+	status = ptr['atomicstatus']&~G_SCAN
 	# Goroutine is not running nor in syscall, so use the info in goroutine
 	if status != G_RUNNING and status != G_SYSCALL:
 		return pc.cast(vp), sp.cast(vp)

@@ -1,4 +1,5 @@
-// Code generated from _gen/386splitload.rules using 'go generate'; DO NOT EDIT.
+// Code generated from gen/386splitload.rules; DO NOT EDIT.
+// generated with: cd gen; go run *.go
 
 package ssa
 

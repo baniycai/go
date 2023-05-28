@@ -73,8 +73,7 @@ func main() {
 
 	{
 		var g func() int
-		var i int
-		for i = range [2]int{} {
+		for i := range [2]int{} {
 			if i == 0 {
 				g = func() int {
 					return i // test that we capture by ref here, i is mutated on every interaction

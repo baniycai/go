@@ -10,9 +10,9 @@
 package macOS
 
 import (
-	"bytes"
 	"errors"
 	"internal/abi"
+	"reflect"
 	"runtime"
 	"time"
 	"unsafe"
@@ -31,8 +31,10 @@ type CFRef uintptr
 func CFDataToSlice(data CFRef) []byte {
 	length := CFDataGetLength(data)
 	ptr := CFDataGetBytePtr(data)
-	src := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), length)
-	return bytes.Clone(src)
+	src := (*[1 << 20]byte)(unsafe.Pointer(ptr))[:length:length]
+	out := make([]byte, length)
+	copy(out, src)
+	return out
 }
 
 // CFStringToString returns a Go string representation of the passed
@@ -47,7 +49,7 @@ func CFStringToString(ref CFRef) string {
 	return string(b)
 }
 
-// TimeToCFDateRef converts a time.Time into an apple CFDateRef.
+// TimeToCFDateRef converts a time.Time into an apple CFDateRef
 func TimeToCFDateRef(t time.Time) CFRef {
 	secs := t.Sub(time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)).Seconds()
 	ref := CFDateCreate(secs)
@@ -62,7 +64,7 @@ const kCFStringEncodingUTF8 = 0x08000100
 //go:cgo_import_dynamic x509_CFDataCreate CFDataCreate "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation"
 
 func BytesToCFData(b []byte) CFRef {
-	p := unsafe.Pointer(unsafe.SliceData(b))
+	p := unsafe.Pointer((*reflect.SliceHeader)(unsafe.Pointer(&b)).Data)
 	ret := syscall(abi.FuncPCABI0(x509_CFDataCreate_trampoline), kCFAllocatorDefault, uintptr(p), uintptr(len(b)), 0, 0, 0)
 	runtime.KeepAlive(p)
 	return CFRef(ret)
@@ -73,7 +75,7 @@ func x509_CFDataCreate_trampoline()
 
 // StringToCFString returns a copy of the UTF-8 contents of s as a new CFString.
 func StringToCFString(s string) CFString {
-	p := unsafe.Pointer(unsafe.StringData(s))
+	p := unsafe.Pointer((*reflect.StringHeader)(unsafe.Pointer(&s)).Data)
 	ret := syscall(abi.FuncPCABI0(x509_CFStringCreateWithBytes_trampoline), kCFAllocatorDefault, uintptr(p),
 		uintptr(len(s)), uintptr(kCFStringEncodingUTF8), 0 /* isExternalRepresentation */, 0)
 	runtime.KeepAlive(p)
@@ -185,13 +187,6 @@ func CFErrorCopyDescription(errRef CFRef) CFRef {
 	return CFRef(ret)
 }
 func x509_CFErrorCopyDescription_trampoline()
-
-//go:cgo_import_dynamic x509_CFErrorGetCode CFErrorGetCode "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation"
-
-func CFErrorGetCode(errRef CFRef) int {
-	return int(syscall(abi.FuncPCABI0(x509_CFErrorGetCode_trampoline), uintptr(errRef), 0, 0, 0, 0, 0))
-}
-func x509_CFErrorGetCode_trampoline()
 
 //go:cgo_import_dynamic x509_CFStringCreateExternalRepresentation CFStringCreateExternalRepresentation "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation"
 

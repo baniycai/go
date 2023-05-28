@@ -2,8 +2,8 @@
 # The recursive updating was trying to walk to
 # former dependencies, not current ones.
 
-[!net:github.com] skip
-[!git] skip
+[!net] skip
+[!exec:git] skip
 env GO111MODULE=off
 
 # Rewind

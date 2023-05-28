@@ -36,7 +36,8 @@ var (
 
 	goBuildComment = []byte("//go:build")
 
-	errMultipleGoBuild = errors.New("multiple //go:build comments")
+	errGoBuildWithoutBuild = errors.New("//go:build comment without // +build comment")
+	errMultipleGoBuild     = errors.New("multiple //go:build comments")
 )
 
 func isGoBuildComment(line []byte) bool {
@@ -323,7 +324,6 @@ var KnownOS = map[string]bool{
 	"openbsd":   true,
 	"plan9":     true,
 	"solaris":   true,
-	"wasip1":    true,
 	"windows":   true,
 	"zos":       true,
 }

@@ -5,6 +5,7 @@
 package template
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -23,7 +24,7 @@ import (
 // Execute returns that error.
 //
 // Errors returned by Execute wrap the underlying error; call errors.As to
-// unwrap them.
+// uncover them.
 //
 // When template execution invokes a function with an argument list, that list
 // must be assignable to the function's parameter types. Functions meant to
@@ -437,7 +438,7 @@ func basicKind(v reflect.Value) (kind, error) {
 
 // isNil returns true if v is the zero reflect.Value, or nil of its type.
 func isNil(v reflect.Value) bool {
-	if !v.IsValid() {
+	if v == zero {
 		return true
 	}
 	switch v.Kind() {
@@ -641,7 +642,7 @@ func HTMLEscapeString(s string) string {
 	if !strings.ContainsAny(s, "'\"&<>\000") {
 		return s
 	}
-	var b strings.Builder
+	var b bytes.Buffer
 	HTMLEscape(&b, []byte(s))
 	return b.String()
 }
@@ -724,7 +725,7 @@ func JSEscapeString(s string) string {
 	if strings.IndexFunc(s, jsIsSpecial) < 0 {
 		return s
 	}
-	var b strings.Builder
+	var b bytes.Buffer
 	JSEscape(&b, []byte(s))
 	return b.String()
 }

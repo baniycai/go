@@ -6,7 +6,6 @@ package test
 
 import (
 	"cmd/go/internal/base"
-	"cmd/go/internal/cfg"
 	"fmt"
 	"io"
 	"os"
@@ -36,7 +35,7 @@ func initCoverProfile() {
 	if err != nil {
 		base.Fatalf("%v", err)
 	}
-	_, err = fmt.Fprintf(f, "mode: %s\n", cfg.BuildCoverMode)
+	_, err = fmt.Fprintf(f, "mode: %s\n", testCoverMode)
 	if err != nil {
 		base.Fatalf("%v", err)
 	}
@@ -52,7 +51,7 @@ func mergeCoverProfile(ew io.Writer, file string) {
 	coverMerge.Lock()
 	defer coverMerge.Unlock()
 
-	expect := fmt.Sprintf("mode: %s\n", cfg.BuildCoverMode)
+	expect := fmt.Sprintf("mode: %s\n", testCoverMode)
 	buf := make([]byte, len(expect))
 	r, err := os.Open(file)
 	if err != nil {
@@ -66,7 +65,7 @@ func mergeCoverProfile(ew io.Writer, file string) {
 		return
 	}
 	if err != nil || string(buf) != expect {
-		fmt.Fprintf(ew, "error: test wrote malformed coverage profile %s.\n", file)
+		fmt.Fprintf(ew, "error: test wrote malformed coverage profile.\n")
 		return
 	}
 	_, err = io.Copy(coverMerge.f, r)

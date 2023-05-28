@@ -27,11 +27,11 @@ const (
 	mutexRLock   = 1 << 1
 	mutexWLock   = 1 << 2
 	mutexRef     = 1 << 3
-	mutexRefMask = (1<<20 - 1) << 3
+	mutexRefMask = (1<<20 - 1) << 3 // 11111111111111111111000   23位，最后3位是保留的，前面的20是用来引用计数的
 	mutexRWait   = 1 << 23
-	mutexRMask   = (1<<20 - 1) << 23
+	mutexRMask   = (1<<20 - 1) << 23 // 20+23=43位
 	mutexWWait   = 1 << 43
-	mutexWMask   = (1<<20 - 1) << 43
+	mutexWMask   = (1<<20 - 1) << 43 // 20+43=63位
 )
 
 const overflowMsg = "too many concurrent operations on a single file or socket (max 1048575)"
@@ -66,24 +66,42 @@ func (mu *fdMutex) incref() bool {
 	}
 }
 
+// 当多个 goroutine 竞争同一个文件描述符时，需要一种方式来保证它们能够按照正确的顺序访问该文件描述符。
+// 为了实现对文件描述符的安全访问，Go 语言使用了信号量机制来进行同步。
+// 当一个 goroutine 需要访问文件描述符时，它会先获取该文件描述符的锁，然后执行相应的操作。
+// 在文件描述符使用完毕后，该 goroutine 再释放该文件描述符的锁，以便其他 goroutine 能够获取该锁并继续访问该文件描述符。
+// 在 increfAndClose 方法中，如果发生了错误导致文件描述符无法正常关闭，就需要将引用计数减一以防止泄露。此时，需要释放该文件描述符的锁，以便其他竞争该文件描述符的 goroutine 能够重新尝试关闭该文件描述符。
+// 因此，在 fd_mutex.go 文件的 increfAndClose 方法中调用 runtime_Semrelease 方法是为了释放该文件描述符对应的信号量，并且确保其他 goroutine 能够重新尝试关闭该文件描述符。
+
+// 在 Go 语言中，用来保护文件描述符的同步机制具体是通过使用信号量（Semaphore）实现的。Semaphore 是一种通用的同步机制，它可以对共享资源进行计数并控制并发访问。在 Go 语言中，每个文件描述符都有一个与之对应的信号量，用于保证该文件描述符的正确访问。
+//Semaphore 的主要特点是可以动态地调整其内部计数器的值，并根据该计数器的值来决定是否允许进程或线程继续执行。在 Go 语言中，可以通过系统调用（如 sem_init、sem_wait 和 sem_post 等函数）来创建和操作 Semaphore。
+//在 fd_mutex.go 文件中，对于每个文件描述符，都会创建一个 sync.Mutex 类型的互斥锁和一个 sema 类型的信号量。其中，互斥锁用于保护文件描述符的读写操作，而信号量则用于控制 goroutine 对该文件描述符的访问顺序。
+//在 increfAndClose 方法中，如果发生了错误导致文件描述符无法正常关闭，就需要将引用计数减一以防止泄露。此时，需要释放该文件描述符的信号量，以便其他竞争该文件描述符的 goroutine 能够重新尝试关闭该文件描述符。
+//因此，在 fd_mutex.go 文件的 increfAndClose 方法中调用 runtime_Semrelease 方法是为了释放该文件描述符对应的信号量，并确保其他 goroutine 能够重新尝试关闭该文件描述符。
+
 // increfAndClose sets the state of mu to closed.
 // It returns false if the file was already closed.
 func (mu *fdMutex) increfAndClose() bool {
 	for {
+		// note state 存储了文件描述符的引用计数和一些标志位信息，低 32 位存储了当前引用计数值，高 32 位存储了一些状态标志位，如是否已经关闭、是否可以读、是否可以写等等
 		old := atomic.LoadUint64(&mu.state)
-		if old&mutexClosed != 0 {
+		if old&mutexClosed != 0 { // 已关闭
 			return false
 		}
 		// Mark as closed and acquire a reference.
-		new := (old | mutexClosed) + mutexRef
+		new := (old | mutexClosed) + mutexRef // +8是为了跳过最后保留的3位吧？
 		if new&mutexRefMask == 0 {
 			panic(overflowMsg)
 		}
 		// Remove all read and write waiters.
+		// note &^= 是 Go 语言中的一种位清除（Bit Clear）操作符，用于将左操作数中对应位置上为 1 且右操作数中对应位置上也为 1 的位设置为 0
+		// note 清空读写等待位数
 		new &^= mutexRMask | mutexWMask
+		// note 更新state
 		if atomic.CompareAndSwapUint64(&mu.state, old, new) {
 			// Wake all read and write waiters,
 			// they will observe closed flag after wakeup.
+			// note 将读写统计数量减1，并唤醒所有在等待读写的协程
 			for old&mutexRMask != 0 {
 				old -= mutexRWait
 				runtime_Semrelease(&mu.rsema)

@@ -6,9 +6,19 @@ package pkgbits
 
 import (
 	"fmt"
-	"runtime"
 	"strings"
 )
+
+// EnableSync controls whether sync markers are written into unified
+// IR's export data format and also whether they're expected when
+// reading them back in. They're inessential to the correct
+// functioning of unified IR, but are helpful during development to
+// detect mistakes.
+//
+// When sync is enabled, writer stack frames will also be included in
+// the export data. Currently, a fixed number of frames are included,
+// controlled by -d=syncframes (default 0).
+const EnableSync = true
 
 // fmtFrames formats a backtrace for reporting reader/writer desyncs.
 func fmtFrames(pcs ...uintptr) []string {
@@ -23,24 +33,6 @@ func fmtFrames(pcs ...uintptr) []string {
 }
 
 type frameVisitor func(file string, line int, name string, offset uintptr)
-
-// walkFrames calls visit for each call frame represented by pcs.
-//
-// pcs should be a slice of PCs, as returned by runtime.Callers.
-func walkFrames(pcs []uintptr, visit frameVisitor) {
-	if len(pcs) == 0 {
-		return
-	}
-
-	frames := runtime.CallersFrames(pcs)
-	for {
-		frame, more := frames.Next()
-		visit(frame.File, frame.Line, frame.Function, frame.PC-frame.Entry)
-		if !more {
-			return
-		}
-	}
-}
 
 // SyncMarker is an enum type that represents markers that may be
 // written to export data to ensure the reader and writer stay
@@ -98,7 +90,6 @@ const (
 	SyncExprs
 	SyncExpr
 	SyncExprType
-	SyncAssign
 	SyncOp
 	SyncFuncLit
 	SyncCompLit
@@ -129,8 +120,4 @@ const (
 	SyncStmtsEnd
 	SyncLabel
 	SyncOptLabel
-
-	SyncMultiExpr
-	SyncRType
-	SyncConvRTTI
 )

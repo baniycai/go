@@ -11,11 +11,7 @@
 
 package cipher
 
-import (
-	"bytes"
-	"crypto/internal/alias"
-	"crypto/subtle"
-)
+import "crypto/internal/subtle"
 
 type cbc struct {
 	b         Block
@@ -28,7 +24,7 @@ func newCBC(b Block, iv []byte) *cbc {
 	return &cbc{
 		b:         b,
 		blockSize: b.BlockSize(),
-		iv:        bytes.Clone(iv),
+		iv:        dup(iv),
 		tmp:       make([]byte, b.BlockSize()),
 	}
 }
@@ -76,7 +72,7 @@ func (x *cbcEncrypter) CryptBlocks(dst, src []byte) {
 	if len(dst) < len(src) {
 		panic("crypto/cipher: output smaller than input")
 	}
-	if alias.InexactOverlap(dst[:len(src)], src) {
+	if subtle.InexactOverlap(dst[:len(src)], src) {
 		panic("crypto/cipher: invalid buffer overlap")
 	}
 
@@ -84,7 +80,7 @@ func (x *cbcEncrypter) CryptBlocks(dst, src []byte) {
 
 	for len(src) > 0 {
 		// Write the xor to dst, then encrypt in place.
-		subtle.XORBytes(dst[:x.blockSize], src[:x.blockSize], iv)
+		xorBytes(dst[:x.blockSize], src[:x.blockSize], iv)
 		x.b.Encrypt(dst[:x.blockSize], dst[:x.blockSize])
 
 		// Move to the next block with this block as the next iv.
@@ -147,7 +143,7 @@ func (x *cbcDecrypter) CryptBlocks(dst, src []byte) {
 	if len(dst) < len(src) {
 		panic("crypto/cipher: output smaller than input")
 	}
-	if alias.InexactOverlap(dst[:len(src)], src) {
+	if subtle.InexactOverlap(dst[:len(src)], src) {
 		panic("crypto/cipher: invalid buffer overlap")
 	}
 	if len(src) == 0 {
@@ -166,7 +162,7 @@ func (x *cbcDecrypter) CryptBlocks(dst, src []byte) {
 	// Loop over all but the first block.
 	for start > 0 {
 		x.b.Decrypt(dst[start:end], src[start:end])
-		subtle.XORBytes(dst[start:end], dst[start:end], src[prev:start])
+		xorBytes(dst[start:end], dst[start:end], src[prev:start])
 
 		end = start
 		start = prev
@@ -175,7 +171,7 @@ func (x *cbcDecrypter) CryptBlocks(dst, src []byte) {
 
 	// The first block is special because it uses the saved iv.
 	x.b.Decrypt(dst[start:end], src[start:end])
-	subtle.XORBytes(dst[start:end], dst[start:end], x.iv)
+	xorBytes(dst[start:end], dst[start:end], x.iv)
 
 	// Set the new iv to the first block we copied earlier.
 	x.iv, x.tmp = x.tmp, x.iv

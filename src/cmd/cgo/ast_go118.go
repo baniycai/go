@@ -3,6 +3,7 @@
 // license that can be found in the LICENSE file.
 
 //go:build !compiler_bootstrap
+// +build !compiler_bootstrap
 
 package main
 
@@ -21,12 +22,4 @@ func (f *File) walkUnexpected(x interface{}, context astContext, visit func(*Fil
 		f.walk(&n.X, ctxExpr, visit)
 		f.walk(n.Indices, ctxExpr, visit)
 	}
-}
-
-func funcTypeTypeParams(n *ast.FuncType) *ast.FieldList {
-	return n.TypeParams
-}
-
-func typeSpecTypeParams(n *ast.TypeSpec) *ast.FieldList {
-	return n.TypeParams
 }

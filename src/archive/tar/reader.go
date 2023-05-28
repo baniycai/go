@@ -7,7 +7,6 @@ package tar
 import (
 	"bytes"
 	"io"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -43,26 +42,14 @@ func NewReader(r io.Reader) *Reader {
 // Next advances to the next entry in the tar archive.
 // The Header.Size determines how many bytes can be read for the next file.
 // Any remaining data in the current file is automatically discarded.
-// At the end of the archive, Next returns the error io.EOF.
 //
-// If Next encounters a non-local name (as defined by [filepath.IsLocal])
-// and the GODEBUG environment variable contains `tarinsecurepath=0`,
-// Next returns the header with an ErrInsecurePath error.
-// A future version of Go may introduce this behavior by default.
-// Programs that want to accept non-local names can ignore
-// the ErrInsecurePath error and use the returned header.
+// io.EOF is returned at the end of the input.
 func (tr *Reader) Next() (*Header, error) {
 	if tr.err != nil {
 		return nil, tr.err
 	}
 	hdr, err := tr.next()
 	tr.err = err
-	if err == nil && !filepath.IsLocal(hdr.Name) {
-		if tarinsecurepath.Value() == "0" {
-			tarinsecurepath.IncNonDefault()
-			err = ErrInsecurePath
-		}
-	}
 	return hdr, err
 }
 
@@ -304,7 +291,7 @@ func mergePAX(hdr *Header, paxHdrs map[string]string) (err error) {
 }
 
 // parsePAX parses PAX headers.
-// If an extended header (type 'x') is invalid, ErrHeader is returned.
+// If an extended header (type 'x') is invalid, ErrHeader is returned
 func parsePAX(r io.Reader) (map[string]string, error) {
 	buf, err := readSpecialFile(r)
 	if err != nil {
@@ -696,7 +683,7 @@ func (fr regFileReader) logicalRemaining() int64 {
 	return fr.nb
 }
 
-// physicalRemaining implements fileState.physicalRemaining.
+// logicalRemaining implements fileState.physicalRemaining.
 func (fr regFileReader) physicalRemaining() int64 {
 	return fr.nb
 }

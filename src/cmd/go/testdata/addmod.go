@@ -16,6 +16,7 @@
 //
 // It is acceptable to edit the archive afterward to remove or shorten files.
 // See mod/README for more information.
+//
 package main
 
 import (
@@ -130,7 +131,7 @@ func main() {
 				if err != nil {
 					return err
 				}
-				a.Files = append(a.Files, txtar.File{Name: str.TrimFilePathPrefix(path, dir), Data: data})
+				a.Files = append(a.Files, txtar.File{Name: strings.TrimPrefix(path, dir+string(filepath.Separator)), Data: data})
 			}
 			return nil
 		})

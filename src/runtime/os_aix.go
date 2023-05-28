@@ -111,17 +111,17 @@ func newosproc0(stacksize uintptr, fn *funcDescriptor) {
 	)
 
 	if pthread_attr_init(&attr) != 0 {
-		writeErrStr(failthreadcreate)
+		write(2, unsafe.Pointer(&failthreadcreate[0]), int32(len(failthreadcreate)))
 		exit(1)
 	}
 
 	if pthread_attr_setstacksize(&attr, threadStackSize) != 0 {
-		writeErrStr(failthreadcreate)
+		write(2, unsafe.Pointer(&failthreadcreate[0]), int32(len(failthreadcreate)))
 		exit(1)
 	}
 
 	if pthread_attr_setdetachstate(&attr, _PTHREAD_CREATE_DETACHED) != 0 {
-		writeErrStr(failthreadcreate)
+		write(2, unsafe.Pointer(&failthreadcreate[0]), int32(len(failthreadcreate)))
 		exit(1)
 	}
 
@@ -140,11 +140,13 @@ func newosproc0(stacksize uintptr, fn *funcDescriptor) {
 	}
 	sigprocmask(_SIG_SETMASK, &oset, nil)
 	if ret != 0 {
-		writeErrStr(failthreadcreate)
+		write(2, unsafe.Pointer(&failthreadcreate[0]), int32(len(failthreadcreate)))
 		exit(1)
 	}
 
 }
+
+var failthreadcreate = []byte("runtime: failed to create new OS thread\n")
 
 // Called to do synchronous initialization of Go code built with
 // -buildmode=c-archive or -buildmode=c-shared.
@@ -163,7 +165,7 @@ func mpreinit(mp *m) {
 }
 
 // errno address must be retrieved by calling _Errno libc function.
-// This will return a pointer to errno.
+// This will return a pointer to errno
 func miniterrno() {
 	mp := getg().m
 	r, _ := syscall0(&libc__Errno)
@@ -211,9 +213,16 @@ func newosproc(mp *m) {
 	// Disable signals during create, so that the new thread starts
 	// with signals disabled. It will enable them in minit.
 	sigprocmask(_SIG_SETMASK, &sigset_all, &oset)
-	ret := retryOnEAGAIN(func() int32 {
-		return pthread_create(&tid, &attr, &tstart, unsafe.Pointer(mp))
-	})
+	var ret int32
+	for tries := 0; tries < 20; tries++ {
+		// pthread_create can fail with EAGAIN for no reasons
+		// but it will be ok if it retries.
+		ret = pthread_create(&tid, &attr, &tstart, unsafe.Pointer(mp))
+		if ret != _EAGAIN {
+			break
+		}
+		usleep(uint32(tries+1) * 1000) // Milliseconds.
+	}
 	sigprocmask(_SIG_SETMASK, &oset, nil)
 	if ret != 0 {
 		print("runtime: failed to create new OS thread (have ", mcount(), " already; errno=", ret, ")\n")
@@ -288,7 +297,7 @@ func getsig(i uint32) uintptr {
 	return sa.sa_handler
 }
 
-// setSignalstackSP sets the ss_sp field of a stackt.
+// setSignaltstackSP sets the ss_sp field of a stackt.
 //
 //go:nosplit
 func setSignalstackSP(s *stackt, sp uintptr) {
@@ -352,17 +361,20 @@ func walltime() (sec int64, nsec int32) {
 }
 
 //go:nosplit
-func fcntl(fd, cmd, arg int32) (int32, int32) {
-	r, errno := syscall3(&libc_fcntl, uintptr(fd), uintptr(cmd), uintptr(arg))
-	return int32(r), int32(errno)
+func fcntl(fd, cmd, arg int32) int32 {
+	r, _ := syscall3(&libc_fcntl, uintptr(fd), uintptr(cmd), uintptr(arg))
+	return int32(r)
+}
+
+//go:nosplit
+func closeonexec(fd int32) {
+	fcntl(fd, _F_SETFD, _FD_CLOEXEC)
 }
 
 //go:nosplit
 func setNonblock(fd int32) {
-	flags, _ := fcntl(fd, _F_GETFL, 0)
-	if flags != -1 {
-		fcntl(fd, _F_SETFL, flags|_O_NONBLOCK)
-	}
+	flags := fcntl(fd, _F_GETFL, 0)
+	fcntl(fd, _F_SETFL, flags|_O_NONBLOCK)
 }
 
 // sigPerThreadSyscall is only used on linux, so we assign a bogus signal

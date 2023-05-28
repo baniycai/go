@@ -17,9 +17,7 @@ import (
 // If x matches the format, then the rest of the fields describe how to interpret x.
 // The opBits describe bits that should be extracted from x and added to the opcode.
 // For example opBits = 0x1234 means that the value
-//
 //	(2 bits at offset 1) followed by (4 bits at offset 3)
-//
 // should be added to op.
 // Finally the args describe how to decode the instruction arguments.
 // args is stored as a fixed-size array; if there are fewer than len(args) arguments,
@@ -235,9 +233,9 @@ func decodeArg(aop instArg, x uint32) Arg {
 		typ, count := decodeShift(x)
 		// ROR #0 here means ROR #0, but decodeShift rewrites to RRX #1.
 		if typ == RotateRightExt {
-			return Rm
+			return Reg(Rm)
 		}
-		return RegShift{Rm, typ, count}
+		return RegShift{Rm, typ, uint8(count)}
 
 	case arg_R_shift_R:
 		Rm := Reg(x & (1<<4 - 1))
@@ -251,7 +249,7 @@ func decodeArg(aop instArg, x uint32) Arg {
 		if typ == ShiftLeft && count == 0 {
 			return Reg(Rm)
 		}
-		return RegShift{Rm, typ, count}
+		return RegShift{Rm, typ, uint8(count)}
 
 	case arg_R1_0:
 		return Reg((x & (1<<4 - 1)))

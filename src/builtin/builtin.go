@@ -78,6 +78,12 @@ type int int
 // distinct type, however, and not an alias for, say, uint32.
 type uint uint
 
+// uintptr 是 Go 语言的一种预定义类型，它表示一个无符号整数，具体大小取决于底层计算机的架构。
+// 在大多数情况下，uintptr 的大小与指针相同，即在 32 位系统上为 4 字节，在 64 位系统上为 8 字节。
+// uintptr 类型通常用于将指针转换为整数，并进行运算或存储。
+// 这种转换通常用于实现底层数据结构，如哈希表、跳表等。由于指针和 uintptr 都是无符号整数，因此它们之间可以互相转换，而不会丢失任何信息。
+// 需要注意的是，使用 uintptr 进行指针转换时需要非常小心，以避免潜在的内存安全问题。
+// 由于 uintptr 不包含任何关于指针地址的元信息，因此在将 uintptr 转换回指针时，必须确保转换后的指针仍然指向有效的内存地址。
 // uintptr is an integer type that is large enough to hold the bit pattern of
 // any pointer.
 type uintptr uintptr
@@ -227,15 +233,6 @@ func real(c ComplexType) FloatType
 // the type of c.
 func imag(c ComplexType) FloatType
 
-// The clear built-in function clears maps and slices.
-// For maps, clear deletes all entries, resulting in an empty map.
-// For slices, clear sets all elements up to the length of the slice
-// to the zero value of the respective element type. If the argument
-// type is a type parameter, the type parameter's type set must
-// contain only map or slice types, and clear performs the operation
-// implied by the type argument.
-func clear[T ~[]Type | ~map[Type]Type1](t T)
-
 // The close built-in function closes a channel, which must be either
 // bidirectional or send-only. It should be executed only by the sender,
 // never the receiver, and has the effect of shutting down the channel after
@@ -258,10 +255,6 @@ func close(c chan<- Type)
 // that point, the program is terminated with a non-zero exit code. This
 // termination sequence is called panicking and can be controlled by the
 // built-in function recover.
-//
-// Starting in Go 1.21, calling panic with a nil interface value or an
-// untyped nil causes a run-time error (a different panic).
-// The GODEBUG setting panicnil=1 disables the run-time error.
 func panic(v any)
 
 // The recover built-in function allows a program to manage behavior of a

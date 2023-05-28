@@ -54,50 +54,56 @@ func lookupProtocol(_ context.Context, name string) (int, error) {
 }
 
 func (r *Resolver) lookupHost(ctx context.Context, host string) (addrs []string, err error) {
-	order, conf := systemConf().hostLookupOrder(r, host)
-	if order == hostLookupCgo {
-		return cgoLookupHost(ctx, host)
+	order := systemConf().hostLookupOrder(r, host)
+	if !r.preferGo() && order == hostLookupCgo {
+		if addrs, err, ok := cgoLookupHost(ctx, host); ok {
+			return addrs, err
+		}
+		// cgo not available (or netgo); fall back to Go's DNS resolver
+		order = hostLookupFilesDNS
 	}
-	return r.goLookupHostOrder(ctx, host, order, conf)
+	return r.goLookupHostOrder(ctx, host, order)
 }
 
 func (r *Resolver) lookupIP(ctx context.Context, network, host string) (addrs []IPAddr, err error) {
 	if r.preferGo() {
 		return r.goLookupIP(ctx, network, host)
 	}
-	order, conf := systemConf().hostLookupOrder(r, host)
+	order := systemConf().hostLookupOrder(r, host)
 	if order == hostLookupCgo {
-		return cgoLookupIP(ctx, network, host)
+		if addrs, err, ok := cgoLookupIP(ctx, network, host); ok {
+			return addrs, err
+		}
+		// cgo not available (or netgo); fall back to Go's DNS resolver
+		order = hostLookupFilesDNS
 	}
-	ips, _, err := r.goLookupIPCNAMEOrder(ctx, network, host, order, conf)
+	ips, _, err := r.goLookupIPCNAMEOrder(ctx, network, host, order)
 	return ips, err
 }
 
 func (r *Resolver) lookupPort(ctx context.Context, network, service string) (int, error) {
-	// Port lookup is not a DNS operation.
-	// Prefer the cgo resolver if possible.
-	if !systemConf().mustUseGoResolver(r) {
-		port, err := cgoLookupPort(ctx, network, service)
-		if err != nil {
-			// Issue 18213: if cgo fails, first check to see whether we
-			// have the answer baked-in to the net package.
-			if port, err := goLookupPort(network, service); err == nil {
-				return port, nil
+	if !r.preferGo() && systemConf().canUseCgo() {
+		if port, err, ok := cgoLookupPort(ctx, network, service); ok {
+			if err != nil {
+				// Issue 18213: if cgo fails, first check to see whether we
+				// have the answer baked-in to the net package.
+				if port, err := goLookupPort(network, service); err == nil {
+					return port, nil
+				}
 			}
+			return port, err
 		}
-		return port, err
 	}
 	return goLookupPort(network, service)
 }
 
 func (r *Resolver) lookupCNAME(ctx context.Context, name string) (string, error) {
-	order, conf := systemConf().hostLookupOrder(r, name)
-	if order == hostLookupCgo {
+	if !r.preferGo() && systemConf().canUseCgo() {
 		if cname, err, ok := cgoLookupCNAME(ctx, name); ok {
 			return cname, err
 		}
 	}
-	return r.goLookupCNAME(ctx, name, order, conf)
+	return r.goLookupCNAME(ctx, name)
 }
 
 func (r *Resolver) lookupSRV(ctx context.Context, service, proto, name string) (string, []*SRV, error) {
@@ -117,11 +123,12 @@ func (r *Resolver) lookupTXT(ctx context.Context, name string) ([]string, error)
 }
 
 func (r *Resolver) lookupAddr(ctx context.Context, addr string) ([]string, error) {
-	order, conf := systemConf().addrLookupOrder(r, addr)
-	if order == hostLookupCgo {
-		return cgoLookupPTR(ctx, addr)
+	if !r.preferGo() && systemConf().canUseCgo() {
+		if ptrs, err, ok := cgoLookupPTR(ctx, addr); ok {
+			return ptrs, err
+		}
 	}
-	return r.goLookupPTR(ctx, addr, order, conf)
+	return r.goLookupPTR(ctx, addr)
 }
 
 // concurrentThreadsLimit returns the number of threads we permit to
@@ -139,11 +146,11 @@ func concurrentThreadsLimit() int {
 	if err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rlim); err != nil {
 		return 500
 	}
-	r := rlim.Cur
+	r := int(rlim.Cur)
 	if r > 500 {
 		r = 500
 	} else if r > 30 {
 		r -= 30
 	}
-	return int(r)
+	return r
 }

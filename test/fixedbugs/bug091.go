@@ -18,7 +18,6 @@ func f2() {
 
 func f3() {
 	i := c // ERROR "undef"
-	_ = i
 }
 
 func main() {

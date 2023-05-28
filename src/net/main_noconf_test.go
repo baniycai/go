@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build (js && wasm) || plan9 || wasip1
+//go:build (js && wasm) || plan9 || windows
 
 package net
 
@@ -11,7 +11,7 @@ import "runtime"
 // See main_conf_test.go for what these (don't) do.
 func forceGoDNS() func() {
 	switch runtime.GOOS {
-	case "plan9":
+	case "plan9", "windows":
 		return func() {}
 	default:
 		return nil

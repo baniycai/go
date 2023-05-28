@@ -18,7 +18,8 @@ const (
  *	wasm
  */
 const (
-	AGet = obj.ABaseWasm + obj.A_ARCHSPECIFIC + iota
+	ACallImport = obj.ABaseWasm + obj.A_ARCHSPECIFIC + iota
+	AGet
 	ASet
 	ATee
 	ANot // alias for I32Eqz
@@ -229,17 +230,6 @@ const (
 	AI64TruncSatF32U
 	AI64TruncSatF64S
 	AI64TruncSatF64U
-
-	AMemoryInit
-	ADataDrop
-	AMemoryCopy
-	AMemoryFill
-	ATableInit
-	AElemDrop
-	ATableCopy
-	ATableGrow
-	ATableSize
-	ATableFill
 
 	ALast // Sentinel: End of low-level WebAssembly instructions.
 

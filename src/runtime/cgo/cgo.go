@@ -23,18 +23,11 @@ package cgo
 #cgo solaris LDFLAGS: -lxnet
 #cgo solaris LDFLAGS: -lsocket
 
-// Use -fno-stack-protector to avoid problems locating the
-// proper support functions. See issues #52919, #54313, #58385.
+// We use -fno-stack-protector because internal linking won't find
+// the support functions. See issues #52919 and #54313.
 #cgo CFLAGS: -Wall -Werror -fno-stack-protector
 
 #cgo solaris CPPFLAGS: -D_POSIX_PTHREAD_SEMANTICS
 
 */
 import "C"
-
-import "runtime/internal/sys"
-
-// Incomplete is used specifically for the semantics of incomplete C types.
-type Incomplete struct {
-	_ sys.NotInHeap
-}

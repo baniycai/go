@@ -67,10 +67,6 @@ func decBoolSlice(state *decoderState, v reflect.Value, length int, ovfl error) 
 		if state.b.Len() == 0 {
 			errorf("decoding bool array or slice: length exceeds input size (%d elements)", length)
 		}
-		if i >= len(slice) {
-			// This is a slice that we only partially allocated.
-			growSlice(v, &slice, length)
-		}
 		slice[i] = state.decodeUint() != 0
 	}
 	return true
@@ -93,10 +89,6 @@ func decComplex64Slice(state *decoderState, v reflect.Value, length int, ovfl er
 	for i := 0; i < length; i++ {
 		if state.b.Len() == 0 {
 			errorf("decoding complex64 array or slice: length exceeds input size (%d elements)", length)
-		}
-		if i >= len(slice) {
-			// This is a slice that we only partially allocated.
-			growSlice(v, &slice, length)
 		}
 		real := float32FromBits(state.decodeUint(), ovfl)
 		imag := float32FromBits(state.decodeUint(), ovfl)
@@ -123,10 +115,6 @@ func decComplex128Slice(state *decoderState, v reflect.Value, length int, ovfl e
 		if state.b.Len() == 0 {
 			errorf("decoding complex128 array or slice: length exceeds input size (%d elements)", length)
 		}
-		if i >= len(slice) {
-			// This is a slice that we only partially allocated.
-			growSlice(v, &slice, length)
-		}
 		real := float64FromBits(state.decodeUint())
 		imag := float64FromBits(state.decodeUint())
 		slice[i] = complex(real, imag)
@@ -152,10 +140,6 @@ func decFloat32Slice(state *decoderState, v reflect.Value, length int, ovfl erro
 		if state.b.Len() == 0 {
 			errorf("decoding float32 array or slice: length exceeds input size (%d elements)", length)
 		}
-		if i >= len(slice) {
-			// This is a slice that we only partially allocated.
-			growSlice(v, &slice, length)
-		}
 		slice[i] = float32(float32FromBits(state.decodeUint(), ovfl))
 	}
 	return true
@@ -179,10 +163,6 @@ func decFloat64Slice(state *decoderState, v reflect.Value, length int, ovfl erro
 		if state.b.Len() == 0 {
 			errorf("decoding float64 array or slice: length exceeds input size (%d elements)", length)
 		}
-		if i >= len(slice) {
-			// This is a slice that we only partially allocated.
-			growSlice(v, &slice, length)
-		}
 		slice[i] = float64FromBits(state.decodeUint())
 	}
 	return true
@@ -205,10 +185,6 @@ func decIntSlice(state *decoderState, v reflect.Value, length int, ovfl error) b
 	for i := 0; i < length; i++ {
 		if state.b.Len() == 0 {
 			errorf("decoding int array or slice: length exceeds input size (%d elements)", length)
-		}
-		if i >= len(slice) {
-			// This is a slice that we only partially allocated.
-			growSlice(v, &slice, length)
 		}
 		x := state.decodeInt()
 		// MinInt and MaxInt
@@ -238,10 +214,6 @@ func decInt16Slice(state *decoderState, v reflect.Value, length int, ovfl error)
 		if state.b.Len() == 0 {
 			errorf("decoding int16 array or slice: length exceeds input size (%d elements)", length)
 		}
-		if i >= len(slice) {
-			// This is a slice that we only partially allocated.
-			growSlice(v, &slice, length)
-		}
 		x := state.decodeInt()
 		if x < math.MinInt16 || math.MaxInt16 < x {
 			error_(ovfl)
@@ -268,10 +240,6 @@ func decInt32Slice(state *decoderState, v reflect.Value, length int, ovfl error)
 	for i := 0; i < length; i++ {
 		if state.b.Len() == 0 {
 			errorf("decoding int32 array or slice: length exceeds input size (%d elements)", length)
-		}
-		if i >= len(slice) {
-			// This is a slice that we only partially allocated.
-			growSlice(v, &slice, length)
 		}
 		x := state.decodeInt()
 		if x < math.MinInt32 || math.MaxInt32 < x {
@@ -300,10 +268,6 @@ func decInt64Slice(state *decoderState, v reflect.Value, length int, ovfl error)
 		if state.b.Len() == 0 {
 			errorf("decoding int64 array or slice: length exceeds input size (%d elements)", length)
 		}
-		if i >= len(slice) {
-			// This is a slice that we only partially allocated.
-			growSlice(v, &slice, length)
-		}
 		slice[i] = state.decodeInt()
 	}
 	return true
@@ -326,10 +290,6 @@ func decInt8Slice(state *decoderState, v reflect.Value, length int, ovfl error) 
 	for i := 0; i < length; i++ {
 		if state.b.Len() == 0 {
 			errorf("decoding int8 array or slice: length exceeds input size (%d elements)", length)
-		}
-		if i >= len(slice) {
-			// This is a slice that we only partially allocated.
-			growSlice(v, &slice, length)
 		}
 		x := state.decodeInt()
 		if x < math.MinInt8 || math.MaxInt8 < x {
@@ -357,10 +317,6 @@ func decStringSlice(state *decoderState, v reflect.Value, length int, ovfl error
 	for i := 0; i < length; i++ {
 		if state.b.Len() == 0 {
 			errorf("decoding string array or slice: length exceeds input size (%d elements)", length)
-		}
-		if i >= len(slice) {
-			// This is a slice that we only partially allocated.
-			growSlice(v, &slice, length)
 		}
 		u := state.decodeUint()
 		n := int(u)
@@ -399,10 +355,6 @@ func decUintSlice(state *decoderState, v reflect.Value, length int, ovfl error) 
 		if state.b.Len() == 0 {
 			errorf("decoding uint array or slice: length exceeds input size (%d elements)", length)
 		}
-		if i >= len(slice) {
-			// This is a slice that we only partially allocated.
-			growSlice(v, &slice, length)
-		}
 		x := state.decodeUint()
 		/*TODO if math.MaxUint32 < x {
 			error_(ovfl)
@@ -429,10 +381,6 @@ func decUint16Slice(state *decoderState, v reflect.Value, length int, ovfl error
 	for i := 0; i < length; i++ {
 		if state.b.Len() == 0 {
 			errorf("decoding uint16 array or slice: length exceeds input size (%d elements)", length)
-		}
-		if i >= len(slice) {
-			// This is a slice that we only partially allocated.
-			growSlice(v, &slice, length)
 		}
 		x := state.decodeUint()
 		if math.MaxUint16 < x {
@@ -461,10 +409,6 @@ func decUint32Slice(state *decoderState, v reflect.Value, length int, ovfl error
 		if state.b.Len() == 0 {
 			errorf("decoding uint32 array or slice: length exceeds input size (%d elements)", length)
 		}
-		if i >= len(slice) {
-			// This is a slice that we only partially allocated.
-			growSlice(v, &slice, length)
-		}
 		x := state.decodeUint()
 		if math.MaxUint32 < x {
 			error_(ovfl)
@@ -492,10 +436,6 @@ func decUint64Slice(state *decoderState, v reflect.Value, length int, ovfl error
 		if state.b.Len() == 0 {
 			errorf("decoding uint64 array or slice: length exceeds input size (%d elements)", length)
 		}
-		if i >= len(slice) {
-			// This is a slice that we only partially allocated.
-			growSlice(v, &slice, length)
-		}
 		slice[i] = state.decodeUint()
 	}
 	return true
@@ -519,10 +459,6 @@ func decUintptrSlice(state *decoderState, v reflect.Value, length int, ovfl erro
 		if state.b.Len() == 0 {
 			errorf("decoding uintptr array or slice: length exceeds input size (%d elements)", length)
 		}
-		if i >= len(slice) {
-			// This is a slice that we only partially allocated.
-			growSlice(v, &slice, length)
-		}
 		x := state.decodeUint()
 		if uint64(^uintptr(0)) < x {
 			error_(ovfl)
@@ -530,19 +466,4 @@ func decUintptrSlice(state *decoderState, v reflect.Value, length int, ovfl erro
 		slice[i] = uintptr(x)
 	}
 	return true
-}
-
-// growSlice is called for a slice that we only partially allocated,
-// to grow it up to length.
-func growSlice[E any](v reflect.Value, ps *[]E, length int) {
-	var zero E
-	s := *ps
-	s = append(s, zero)
-	cp := cap(s)
-	if cp > length {
-		cp = length
-	}
-	s = s[:cp]
-	v.Set(reflect.ValueOf(s))
-	*ps = s
 }

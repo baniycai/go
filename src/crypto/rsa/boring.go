@@ -11,6 +11,7 @@ import (
 	"crypto/internal/boring/bbig"
 	"crypto/internal/boring/bcache"
 	"math/big"
+	"unsafe"
 )
 
 // Cached conversions from Go PublicKey/PrivateKey to BoringCrypto.
@@ -31,8 +32,8 @@ type boringPub struct {
 	orig PublicKey
 }
 
-var pubCache bcache.Cache[PublicKey, boringPub]
-var privCache bcache.Cache[PrivateKey, boringPriv]
+var pubCache bcache.Cache
+var privCache bcache.Cache
 
 func init() {
 	pubCache.Register()
@@ -40,7 +41,7 @@ func init() {
 }
 
 func boringPublicKey(pub *PublicKey) (*boring.PublicKeyRSA, error) {
-	b := pubCache.Get(pub)
+	b := (*boringPub)(pubCache.Get(unsafe.Pointer(pub)))
 	if b != nil && publicKeyEqual(&b.orig, pub) {
 		return b.key, nil
 	}
@@ -52,7 +53,7 @@ func boringPublicKey(pub *PublicKey) (*boring.PublicKeyRSA, error) {
 		return nil, err
 	}
 	b.key = key
-	pubCache.Put(pub, b)
+	pubCache.Put(unsafe.Pointer(pub), unsafe.Pointer(b))
 	return key, nil
 }
 
@@ -62,7 +63,7 @@ type boringPriv struct {
 }
 
 func boringPrivateKey(priv *PrivateKey) (*boring.PrivateKeyRSA, error) {
-	b := privCache.Get(priv)
+	b := (*boringPriv)(privCache.Get(unsafe.Pointer(priv)))
 	if b != nil && privateKeyEqual(&b.orig, priv) {
 		return b.key, nil
 	}
@@ -86,7 +87,7 @@ func boringPrivateKey(priv *PrivateKey) (*boring.PrivateKeyRSA, error) {
 		return nil, err
 	}
 	b.key = key
-	privCache.Put(priv, b)
+	privCache.Put(unsafe.Pointer(priv), unsafe.Pointer(b))
 	return key, nil
 }
 

@@ -184,9 +184,8 @@ func testBrokenTimestamps(t *testing.T, data []byte) {
 }
 
 func TestTraceStress(t *testing.T) {
-	switch runtime.GOOS {
-	case "js", "wasip1":
-		t.Skip("no os.Pipe on " + runtime.GOOS)
+	if runtime.GOOS == "js" {
+		t.Skip("no os.Pipe on js")
 	}
 	if IsEnabled() {
 		t.Skip("skipping because -test.trace is set")
@@ -349,9 +348,8 @@ func isMemoryConstrained() bool {
 // Do a bunch of various stuff (timers, GC, network, etc) in a separate goroutine.
 // And concurrently with all that start/stop trace 3 times.
 func TestTraceStressStartStop(t *testing.T) {
-	switch runtime.GOOS {
-	case "js", "wasip1":
-		t.Skip("no os.Pipe on " + runtime.GOOS)
+	if runtime.GOOS == "js" {
+		t.Skip("no os.Pipe on js")
 	}
 	if IsEnabled() {
 		t.Skip("skipping because -test.trace is set")
@@ -710,7 +708,7 @@ func TestTraceCPUProfile(t *testing.T) {
 	// of CPU samples, so we'll call that success.
 	overflowed := totalTraceSamples >= 1900
 	if traceSamples < pprofSamples {
-		t.Logf("execution trace did not include all CPU profile samples; %d in profile, %d in trace", pprofSamples, traceSamples)
+		t.Logf("exectution trace did not include all CPU profile samples; %d in profile, %d in trace", pprofSamples, traceSamples)
 		if !overflowed {
 			t.Fail()
 		}

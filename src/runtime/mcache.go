@@ -6,7 +6,6 @@ package runtime
 
 import (
 	"runtime/internal/atomic"
-	"runtime/internal/sys"
 	"unsafe"
 )
 
@@ -16,9 +15,9 @@ import (
 //
 // mcaches are allocated from non-GC'd memory, so any heap pointers
 // must be specially handled.
+//
+//go:notinheap
 type mcache struct {
-	_ sys.NotInHeap
-
 	// The following members are accessed on every malloc,
 	// so they are grouped here for better caching.
 	nextSample uintptr // trigger heap sample after allocating this many bytes
@@ -50,7 +49,7 @@ type mcache struct {
 	// was last flushed. If flushGen != mheap_.sweepgen, the spans
 	// in this mcache are stale and need to the flushed so they
 	// can be swept. This is done in acquirep.
-	flushGen atomic.Uint32
+	flushGen uint32
 }
 
 // A gclink is a node in a linked list of blocks, like mlink,
@@ -87,7 +86,7 @@ func allocmcache() *mcache {
 	systemstack(func() {
 		lock(&mheap_.lock)
 		c = (*mcache)(mheap_.cachealloc.alloc())
-		c.flushGen.Store(mheap_.sweepgen)
+		c.flushGen = mheap_.sweepgen
 		unlock(&mheap_.lock)
 	})
 	for i := range c.alloc {
@@ -252,7 +251,7 @@ func (c *mcache) allocLarge(size uintptr, noscan bool) *mspan {
 	// visible to the background sweeper.
 	mheap_.central[spc].mcentral.fullSwept(mheap_.sweepgen).push(s)
 	s.limit = s.base() + size
-	s.initHeapBits(false)
+	heapBitsForAddr(s.base()).initSpan(s)
 	return s
 }
 
@@ -318,14 +317,13 @@ func (c *mcache) prepareForSweep() {
 	// allocate-black. However, with this approach it's difficult
 	// to avoid spilling mark bits into the *next* GC cycle.
 	sg := mheap_.sweepgen
-	flushGen := c.flushGen.Load()
-	if flushGen == sg {
+	if c.flushGen == sg {
 		return
-	} else if flushGen != sg-2 {
-		println("bad flushGen", flushGen, "in prepareForSweep; sweepgen", sg)
+	} else if c.flushGen != sg-2 {
+		println("bad flushGen", c.flushGen, "in prepareForSweep; sweepgen", sg)
 		throw("bad flushGen")
 	}
 	c.releaseAll()
 	stackcache_clear(c)
-	c.flushGen.Store(mheap_.sweepgen) // Synchronizes with gcStart
+	atomic.Store(&c.flushGen, mheap_.sweepgen) // Synchronizes with gcStart
 }

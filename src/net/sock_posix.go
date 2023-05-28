@@ -15,7 +15,7 @@ import (
 
 // socket returns a network file descriptor that is ready for
 // asynchronous I/O using the network poller.
-func socket(ctx context.Context, net string, family, sotype, proto int, ipv6only bool, laddr, raddr sockaddr, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) (fd *netFD, err error) {
+func socket(ctx context.Context, net string, family, sotype, proto int, ipv6only bool, laddr, raddr sockaddr, ctrlFn func(string, string, syscall.RawConn) error) (fd *netFD, err error) {
 	s, err := sysSocket(family, sotype, proto)
 	if err != nil {
 		return nil, err
@@ -54,20 +54,20 @@ func socket(ctx context.Context, net string, family, sotype, proto int, ipv6only
 	if laddr != nil && raddr == nil {
 		switch sotype {
 		case syscall.SOCK_STREAM, syscall.SOCK_SEQPACKET:
-			if err := fd.listenStream(ctx, laddr, listenerBacklog(), ctrlCtxFn); err != nil {
+			if err := fd.listenStream(laddr, listenerBacklog(), ctrlFn); err != nil {
 				fd.Close()
 				return nil, err
 			}
 			return fd, nil
 		case syscall.SOCK_DGRAM:
-			if err := fd.listenDatagram(ctx, laddr, ctrlCtxFn); err != nil {
+			if err := fd.listenDatagram(laddr, ctrlFn); err != nil {
 				fd.Close()
 				return nil, err
 			}
 			return fd, nil
 		}
 	}
-	if err := fd.dial(ctx, laddr, raddr, ctrlCtxFn); err != nil {
+	if err := fd.dial(ctx, laddr, raddr, ctrlFn); err != nil {
 		fd.Close()
 		return nil, err
 	}
@@ -113,11 +113,9 @@ func (fd *netFD) addrFunc() func(syscall.Sockaddr) Addr {
 	return func(syscall.Sockaddr) Addr { return nil }
 }
 
-func (fd *netFD) dial(ctx context.Context, laddr, raddr sockaddr, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) error {
-	var c *rawConn
-	var err error
-	if ctrlCtxFn != nil {
-		c, err = newRawConn(fd)
+func (fd *netFD) dial(ctx context.Context, laddr, raddr sockaddr, ctrlFn func(string, string, syscall.RawConn) error) error {
+	if ctrlFn != nil {
+		c, err := newRawConn(fd)
 		if err != nil {
 			return err
 		}
@@ -127,11 +125,11 @@ func (fd *netFD) dial(ctx context.Context, laddr, raddr sockaddr, ctrlCtxFn func
 		} else if laddr != nil {
 			ctrlAddr = laddr.String()
 		}
-		if err := ctrlCtxFn(ctx, fd.ctrlNetwork(), ctrlAddr, c); err != nil {
+		if err := ctrlFn(fd.ctrlNetwork(), ctrlAddr, c); err != nil {
 			return err
 		}
 	}
-
+	var err error
 	var lsa syscall.Sockaddr
 	if laddr != nil {
 		if lsa, err = laddr.sockaddr(fd.family); err != nil {
@@ -174,7 +172,7 @@ func (fd *netFD) dial(ctx context.Context, laddr, raddr sockaddr, ctrlCtxFn func
 	return nil
 }
 
-func (fd *netFD) listenStream(ctx context.Context, laddr sockaddr, backlog int, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) error {
+func (fd *netFD) listenStream(laddr sockaddr, backlog int, ctrlFn func(string, string, syscall.RawConn) error) error {
 	var err error
 	if err = setDefaultListenerSockopts(fd.pfd.Sysfd); err != nil {
 		return err
@@ -183,17 +181,15 @@ func (fd *netFD) listenStream(ctx context.Context, laddr sockaddr, backlog int, 
 	if lsa, err = laddr.sockaddr(fd.family); err != nil {
 		return err
 	}
-
-	if ctrlCtxFn != nil {
+	if ctrlFn != nil {
 		c, err := newRawConn(fd)
 		if err != nil {
 			return err
 		}
-		if err := ctrlCtxFn(ctx, fd.ctrlNetwork(), laddr.String(), c); err != nil {
+		if err := ctrlFn(fd.ctrlNetwork(), laddr.String(), c); err != nil {
 			return err
 		}
 	}
-
 	if err = syscall.Bind(fd.pfd.Sysfd, lsa); err != nil {
 		return os.NewSyscallError("bind", err)
 	}
@@ -208,7 +204,7 @@ func (fd *netFD) listenStream(ctx context.Context, laddr sockaddr, backlog int, 
 	return nil
 }
 
-func (fd *netFD) listenDatagram(ctx context.Context, laddr sockaddr, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) error {
+func (fd *netFD) listenDatagram(laddr sockaddr, ctrlFn func(string, string, syscall.RawConn) error) error {
 	switch addr := laddr.(type) {
 	case *UDPAddr:
 		// We provide a socket that listens to a wildcard
@@ -237,13 +233,12 @@ func (fd *netFD) listenDatagram(ctx context.Context, laddr sockaddr, ctrlCtxFn f
 	if lsa, err = laddr.sockaddr(fd.family); err != nil {
 		return err
 	}
-
-	if ctrlCtxFn != nil {
+	if ctrlFn != nil {
 		c, err := newRawConn(fd)
 		if err != nil {
 			return err
 		}
-		if err := ctrlCtxFn(ctx, fd.ctrlNetwork(), laddr.String(), c); err != nil {
+		if err := ctrlFn(fd.ctrlNetwork(), laddr.String(), c); err != nil {
 			return err
 		}
 	}

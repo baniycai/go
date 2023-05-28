@@ -17,7 +17,7 @@
 //
 // The dist tool enables this by build flag when testing.
 
-//go:build lldb
+// +build lldb
 
 #include <limits.h>
 #include <pthread.h>

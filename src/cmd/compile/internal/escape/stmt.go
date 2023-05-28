@@ -64,7 +64,7 @@ func (e *escape) stmt(n ir.Node) {
 			}
 			e.loopDepth++
 		default:
-			base.Fatalf("label %v missing tag", n.Label)
+			base.Fatalf("label missing tag")
 		}
 		delete(e.labels, n.Label)
 
@@ -74,13 +74,8 @@ func (e *escape) stmt(n ir.Node) {
 		e.block(n.Body)
 		e.block(n.Else)
 
-	case ir.OCHECKNIL:
-		n := n.(*ir.UnaryExpr)
-		e.discard(n.X)
-
-	case ir.OFOR:
+	case ir.OFOR, ir.OFORUNTIL:
 		n := n.(*ir.ForStmt)
-		base.Assert(!n.DistinctVars) // Should all be rewritten before escape analysis
 		e.loopDepth++
 		e.discard(n.Cond)
 		e.stmt(n.Post)
@@ -90,7 +85,6 @@ func (e *escape) stmt(n ir.Node) {
 	case ir.ORANGE:
 		// for Key, Value = range X { Body }
 		n := n.(*ir.RangeStmt)
-		base.Assert(!n.DistinctVars) // Should all be rewritten before escape analysis
 
 		// X is evaluated outside the loop.
 		tmp := e.newLoc(nil, false)
@@ -182,7 +176,7 @@ func (e *escape) stmt(n ir.Node) {
 			dsts[i] = res.Nname.(*ir.Name)
 		}
 		e.assignList(dsts, n.Results, "return", n)
-	case ir.OCALLFUNC, ir.OCALLMETH, ir.OCALLINTER, ir.OINLCALL, ir.OCLEAR, ir.OCLOSE, ir.OCOPY, ir.ODELETE, ir.OPANIC, ir.OPRINT, ir.OPRINTN, ir.ORECOVER:
+	case ir.OCALLFUNC, ir.OCALLMETH, ir.OCALLINTER, ir.OINLCALL, ir.OCLOSE, ir.OCOPY, ir.ODELETE, ir.OPANIC, ir.OPRINT, ir.OPRINTN, ir.ORECOVER:
 		e.call(nil, n)
 	case ir.OGO, ir.ODEFER:
 		n := n.(*ir.GoDeferStmt)

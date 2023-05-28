@@ -231,14 +231,32 @@ func readImportFile(path string, target *ir.Package, env *types2.Context, packag
 
 	switch c {
 	case 'u':
+		if !buildcfg.Experiment.Unified {
+			base.Fatalf("unexpected export data format")
+		}
+
 		// TODO(mdempsky): This seems a bit clunky.
 		data = strings.TrimSuffix(data, "\n$$\n")
 
 		pr := pkgbits.NewPkgDecoder(pkg1.Path, data)
 
 		// Read package descriptors for both types2 and compiler backend.
-		readPackage(newPkgReader(pr), pkg1, false)
+		readPackage(newPkgReader(pr), pkg1)
 		pkg2 = importer.ReadPackage(env, packages, pr)
+
+	case 'i':
+		if buildcfg.Experiment.Unified {
+			base.Fatalf("unexpected export data format")
+		}
+
+		typecheck.ReadImports(pkg1, data)
+
+		if packages != nil {
+			pkg2, err = importer.ImportData(packages, data, path)
+			if err != nil {
+				return
+			}
+		}
 
 	default:
 		// Indexed format is distinguished by an 'i' byte,
@@ -337,6 +355,16 @@ func addFingerprint(path string, f *os.File, end int64) error {
 	return nil
 }
 
+// The linker uses the magic symbol prefixes "go." and "type."
+// Avoid potential confusion between import paths and symbols
+// by rejecting these reserved imports for now. Also, people
+// "can do weird things in GOPATH and we'd prefer they didn't
+// do _that_ weird thing" (per rsc). See also #4257.
+var reservedimports = []string{
+	"go",
+	"type",
+}
+
 func checkImportPath(path string, allowSpace bool) error {
 	if path == "" {
 		return errors.New("import path is empty")
@@ -346,7 +374,7 @@ func checkImportPath(path string, allowSpace bool) error {
 		return errors.New("import path contains NUL")
 	}
 
-	for ri := range base.ReservedImports {
+	for _, ri := range reservedimports {
 		if path == ri {
 			return fmt.Errorf("import path %q is reserved and cannot be used", path)
 		}

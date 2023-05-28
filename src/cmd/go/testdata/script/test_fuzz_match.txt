@@ -1,6 +1,4 @@
 [!fuzz] skip
-[short] skip
-env GOCACHE=$WORK/cache
 
 # Matches only fuzz targets to test.
 go test standalone_fuzz_test.go

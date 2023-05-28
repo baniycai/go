@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"reflect"
-	"strconv"
 	"sync"
 	"unicode/utf8"
 )
@@ -50,7 +49,7 @@ type State interface {
 
 // Formatter is implemented by any value that has a Format method.
 // The implementation controls how State and rune are interpreted,
-// and may call Sprint() or Fprint(f) etc. to generate its output.
+// and may call Sprint(f) or Fprint(f) etc. to generate its output.
 type Formatter interface {
 	Format(f State, verb rune)
 }
@@ -72,31 +71,6 @@ type GoStringer interface {
 	GoString() string
 }
 
-// FormatString returns a string representing the fully qualified formatting
-// directive captured by the State, followed by the argument verb. (State does not
-// itself contain the verb.) The result has a leading percent sign followed by any
-// flags, the width, and the precision. Missing flags, width, and precision are
-// omitted. This function allows a Formatter to reconstruct the original
-// directive triggering the call to Format.
-func FormatString(state State, verb rune) string {
-	var tmp [16]byte // Use a local buffer.
-	b := append(tmp[:0], '%')
-	for _, c := range " +-#0" { // All known flags
-		if state.Flag(int(c)) { // The argument is an int for historical reasons.
-			b = append(b, byte(c))
-		}
-	}
-	if w, ok := state.Width(); ok {
-		b = strconv.AppendInt(b, int64(w), 10)
-	}
-	if p, ok := state.Precision(); ok {
-		b = append(b, '.')
-		b = strconv.AppendInt(b, int64(p), 10)
-	}
-	b = utf8.AppendRune(b, verb)
-	return string(b)
-}
-
 // Use simple []byte instead of bytes.Buffer to avoid large dependency.
 type buffer []byte
 
@@ -113,7 +87,18 @@ func (b *buffer) writeByte(c byte) {
 }
 
 func (bp *buffer) writeRune(r rune) {
-	*bp = utf8.AppendRune(*bp, r)
+	if r < utf8.RuneSelf {
+		*bp = append(*bp, byte(r))
+		return
+	}
+
+	b := *bp
+	n := len(b)
+	for n+utf8.UTFMax > cap(b) {
+		b = append(b, 0)
+	}
+	w := utf8.EncodeRune(b[n:n+utf8.UTFMax], r)
+	*bp = b[:n+w]
 }
 
 // pp is used to store a printer's state and is reused with sync.Pool to avoid allocations.
@@ -121,7 +106,7 @@ type pp struct {
 	buf buffer
 
 	// arg holds the current item, as an interface{}.
-	arg any
+	arg any // 当前占位符对应要替换的值
 
 	// value is used instead of arg for reflect values.
 	value reflect.Value
@@ -139,8 +124,8 @@ type pp struct {
 	erroring bool
 	// wrapErrs is set when the format string may contain a %w verb.
 	wrapErrs bool
-	// wrappedErrs records the targets of the %w verb.
-	wrappedErrs []int
+	// wrappedErr records the target of the %w verb.
+	wrappedErr error
 }
 
 var ppFree = sync.Pool{
@@ -148,6 +133,7 @@ var ppFree = sync.Pool{
 }
 
 // newPrinter allocates a new pp struct or grabs a cached one.
+// NOTE 使用缓存池来存放pp
 func newPrinter() *pp {
 	p := ppFree.Get().(*pp)
 	p.panicking = false
@@ -161,23 +147,18 @@ func newPrinter() *pp {
 func (p *pp) free() {
 	// Proper usage of a sync.Pool requires each entry to have approximately
 	// the same memory cost. To obtain this property when the stored type
-	// contains a variably-sized buffer, we add a hard limit on the maximum
-	// buffer to place back in the pool. If the buffer is larger than the
-	// limit, we drop the buffer and recycle just the printer.
+	// contains a variably-sized buffer, we add a hard limit on the maximum buffer
+	// to place back in the pool.
 	//
-	// See https://golang.org/issue/23199.
-	if cap(p.buf) > 64*1024 {
-		p.buf = nil
-	} else {
-		p.buf = p.buf[:0]
-	}
-	if cap(p.wrappedErrs) > 8 {
-		p.wrappedErrs = nil
+	// See https://golang.org/issue/23199
+	if cap(p.buf) > 64<<10 {
+		return
 	}
 
+	p.buf = p.buf[:0]
 	p.arg = nil
 	p.value = reflect.Value{}
-	p.wrappedErrs = p.wrappedErrs[:0]
+	p.wrappedErr = nil
 	ppFree.Put(p)
 }
 
@@ -623,12 +604,16 @@ func (p *pp) handleMethods(verb rune) (handled bool) {
 		return
 	}
 	if verb == 'w' {
-		// It is invalid to use %w other than with Errorf or with a non-error arg.
-		_, ok := p.arg.(error)
-		if !ok || !p.wrapErrs {
+		// It is invalid to use %w other than with Errorf, more than once,
+		// or with a non-error arg.
+		err, ok := p.arg.(error)
+		if !ok || !p.wrapErrs || p.wrappedErr != nil {
+			p.wrappedErr = nil
+			p.wrapErrs = false
 			p.badVerb(verb)
 			return true
 		}
+		p.wrappedErr = err
 		// If the arg is a Formatter, pass 'v' as the verb to it.
 		verb = 'v'
 	}
@@ -678,14 +663,15 @@ func (p *pp) handleMethods(verb rune) (handled bool) {
 	return false
 }
 
+// verb是占位符，arg是具体值
 func (p *pp) printArg(arg any, verb rune) {
 	p.arg = arg
 	p.value = reflect.Value{}
 
-	if arg == nil {
+	if arg == nil { // 没有对应的替换值
 		switch verb {
 		case 'T', 'v':
-			p.fmt.padString(nilAngleString)
+			p.fmt.padString(nilAngleString) // 补空，达到指定的长度
 		default:
 			p.badVerb(verb)
 		}
@@ -1027,11 +1013,11 @@ formatLoop:
 	for i := 0; i < end; {
 		p.goodArgNum = true
 		lasti := i
-		for i < end && format[i] != '%' {
+		for i < end && format[i] != '%' { // 找到占位符
 			i++
 		}
 		if i > lasti {
-			p.buf.writeString(format[lasti:i])
+			p.buf.writeString(format[lasti:i]) // 先把前面的常规字符写到buffer
 		}
 		if i >= end {
 			// done processing format string
@@ -1059,14 +1045,17 @@ formatLoop:
 			case ' ':
 				p.fmt.space = true
 			default:
+				// 它描述了一个优化路径（fast path），用于处理常见的简单情况。在这种情况下，格式化字符串中的占位符（verbs）是 ASCII 小写字母，且不包含精度（precision）、宽度（width）或参数索引（argument indices）。
+				//让我们详细解释一下这些术语：
+				//占位符（verbs）：在格式化字符串中，占位符用于表示要插入的变量的类型和格式。例如，%d 表示一个整数，%s 表示一个字符串。
+				//精度（precision）：用于控制浮点数的小数位数或字符串的最大长度。例如，%.2f 表示保留两位小数的浮点数。
+				//宽度（width）：用于控制输出的最小宽度。例如，%5d 表示一个至少占用 5 个字符宽度的整数。
+				//参数索引（argument indices）：用于指定要格式化的参数的顺序。例如，%[2]d 表示格式化第二个参数为整数。
+				//这段注释表示，当格式化字符串中的占位符满足这些简单条件时，代码会采用一种更快的处理方式。这是一种优化策略，用于提高处理简单格式化字符串的性能。
 				// Fast path for common case of ascii lower case simple verbs
 				// without precision or width or argument indices.
 				if 'a' <= c && c <= 'z' && argNum < len(a) {
-					switch c {
-					case 'w':
-						p.wrappedErrs = append(p.wrappedErrs, argNum)
-						fallthrough
-					case 'v':
+					if c == 'v' {
 						// Go syntax
 						p.fmt.sharpV = p.fmt.sharp
 						p.fmt.sharp = false
@@ -1074,12 +1063,13 @@ formatLoop:
 						p.fmt.plusV = p.fmt.plus
 						p.fmt.plus = false
 					}
+					// todo 这里
 					p.printArg(a[argNum], rune(c))
 					argNum++
 					i++
 					continue formatLoop
 				}
-				// Format is more complex than simple flags and a verb or is malformed.
+				// Format is more complex than simple flags and a verb or is malformed(畸形的).
 				break simpleFormat
 			}
 		}
@@ -1161,9 +1151,6 @@ formatLoop:
 			p.badArgNum(verb)
 		case argNum >= len(a): // No argument left over to print for the current verb.
 			p.missingArg(verb)
-		case verb == 'w':
-			p.wrappedErrs = append(p.wrappedErrs, argNum)
-			fallthrough
 		case verb == 'v':
 			// Go syntax
 			p.fmt.sharpV = p.fmt.sharp

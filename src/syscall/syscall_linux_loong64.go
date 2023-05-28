@@ -6,11 +6,14 @@ package syscall
 
 import "unsafe"
 
-const (
-	_SYS_setgroups  = SYS_SETGROUPS
-	_SYS_clone3     = 435
-	_SYS_faccessat2 = 439
-)
+const _SYS_setgroups = SYS_SETGROUPS
+
+func EpollCreate(size int) (fd int, err error) {
+	if size <= 0 {
+		return -1, EINVAL
+	}
+	return EpollCreate1(0)
+}
 
 //sys	EpollWait(epfd int, events []EpollEvent, msec int) (n int, err error) = SYS_EPOLL_PWAIT
 //sys	Fchown(fd int, uid int, gid int) (err error)
@@ -187,15 +190,9 @@ func Getrlimit(resource int, rlim *Rlimit) error {
 	return prlimit(0, resource, nil, rlim)
 }
 
-// setrlimit prefers the prlimit64 system call.
-func setrlimit(resource int, rlim *Rlimit) error {
+// Setrlimit prefers the prlimit64 system call.
+func Setrlimit(resource int, rlim *Rlimit) error {
 	return prlimit(0, resource, rlim, nil)
-}
-
-//go:nosplit
-func rawSetrlimit(resource int, rlim *Rlimit) Errno {
-	_, _, errno := RawSyscall6(SYS_PRLIMIT64, 0, uintptr(resource), uintptr(unsafe.Pointer(rlim)), 0, 0, 0)
-	return errno
 }
 
 func (r *PtraceRegs) GetEra() uint64 { return r.Era }
@@ -224,3 +221,5 @@ func Pause() error {
 	_, err := ppoll(nil, 0, nil, nil)
 	return err
 }
+
+func rawVforkSyscall(trap, a1 uintptr) (r1 uintptr, err Errno)

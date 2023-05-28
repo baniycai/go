@@ -8,6 +8,7 @@ package cgi
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"net"
@@ -113,7 +114,7 @@ func TestCGIBasicGet(t *testing.T) {
 		"param-a":               "b",
 		"param-foo":             "bar",
 		"env-GATEWAY_INTERFACE": "CGI/1.1",
-		"env-HTTP_HOST":         "example.com:80",
+		"env-HTTP_HOST":         "example.com",
 		"env-PATH_INFO":         "",
 		"env-QUERY_STRING":      "foo=bar&a=b",
 		"env-REMOTE_ADDR":       "1.2.3.4",
@@ -127,7 +128,7 @@ func TestCGIBasicGet(t *testing.T) {
 		"env-SERVER_PORT":       "80",
 		"env-SERVER_SOFTWARE":   "go",
 	}
-	replay := runCgiTest(t, h, "GET /test.cgi?foo=bar&a=b HTTP/1.0\nHost: example.com:80\n\n", expectedMap)
+	replay := runCgiTest(t, h, "GET /test.cgi?foo=bar&a=b HTTP/1.0\nHost: example.com\n\n", expectedMap)
 
 	if expected, got := "text/html", replay.Header().Get("Content-Type"); got != expected {
 		t.Errorf("got a Content-Type of %q; expected %q", got, expected)
@@ -539,7 +540,7 @@ func TestEnvOverride(t *testing.T) {
 
 func TestHandlerStderr(t *testing.T) {
 	check(t)
-	var stderr strings.Builder
+	var stderr bytes.Buffer
 	h := &Handler{
 		Path:   "testdata/test.cgi",
 		Root:   "/test.cgi",

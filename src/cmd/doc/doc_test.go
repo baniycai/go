@@ -157,7 +157,6 @@ var tests = []test{
 			`Method`,                           // No methods.
 			`someArgument[5-8]`,                // No truncated arguments.
 			`type T1 T2`,                       // Type alias does not display as type declaration.
-			`ignore:directive`,                 // Directives should be dropped.
 		},
 	},
 	// Package dump -all
@@ -225,7 +224,6 @@ var tests = []test{
 			`func internalFunc`,
 			`unexportedField`,
 			`func \(unexportedType\)`,
-			`ignore:directive`,
 		},
 	},
 	// Package with just the package declaration. Issue 31457.
@@ -262,7 +260,6 @@ var tests = []test{
 			`Comment about block of constants`, // No comment for constant block.
 			`Comment about internal function`,  // No comment for internal function.
 			`MultiLine(String|Method|Field)`,   // No data from multi line portions.
-			`ignore:directive`,
 		},
 	},
 	// Package dump -u -all
@@ -315,9 +312,7 @@ var tests = []test{
 			`func \(unexportedType\) ExportedMethod\(\) bool`,
 			`func \(unexportedType\) unexportedMethod\(\) bool`,
 		},
-		[]string{
-			`ignore:directive`,
-		},
+		nil,
 	},
 
 	// Single constant.
@@ -836,39 +831,7 @@ var tests = []test{
     // Text after pre-formatted block\.`,
 			`ExportedField int`,
 		},
-		[]string{"ignore:directive"},
-	},
-	{
-		"formatted doc on entire type",
-		[]string{p, "ExportedFormattedType"},
-		[]string{
-			`type ExportedFormattedType struct`,
-			`	// Comment before exported field with formatting\.
-	//
-	// Example
-	//
-	//	a\.ExportedField = 123
-	//
-	// Text after pre-formatted block\.`,
-			`ExportedField int`,
-		},
-		[]string{"ignore:directive"},
-	},
-	{
-		"formatted doc on entire type with -all",
-		[]string{"-all", p, "ExportedFormattedType"},
-		[]string{
-			`type ExportedFormattedType struct`,
-			`	// Comment before exported field with formatting\.
-	//
-	// Example
-	//
-	//	a\.ExportedField = 123
-	//
-	// Text after pre-formatted block\.`,
-			`ExportedField int`,
-		},
-		[]string{"ignore:directive"},
+		nil,
 	},
 }
 
@@ -1049,7 +1012,7 @@ func TestDotSlashLookup(t *testing.T) {
 	if err := os.Chdir(filepath.Join(buildCtx.GOROOT, "src", "text")); err != nil {
 		t.Fatal(err)
 	}
-	var b strings.Builder
+	var b bytes.Buffer
 	var flagSet flag.FlagSet
 	err = do(&b, &flagSet, []string{"./template"})
 	if err != nil {
@@ -1067,7 +1030,7 @@ func TestDotSlashLookup(t *testing.T) {
 // when there should be no output at all. Issue 37969.
 func TestNoPackageClauseWhenNoMatch(t *testing.T) {
 	maybeSkip(t)
-	var b strings.Builder
+	var b bytes.Buffer
 	var flagSet flag.FlagSet
 	err := do(&b, &flagSet, []string{"template.ZZZ"})
 	// Expect an error.

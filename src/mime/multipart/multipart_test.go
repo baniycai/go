@@ -126,7 +126,7 @@ func TestMultipartSlowInput(t *testing.T) {
 func testMultipart(t *testing.T, r io.Reader, onlyNewlines bool) {
 	t.Parallel()
 	reader := NewReader(r, "MyBoundary")
-	buf := new(strings.Builder)
+	buf := new(bytes.Buffer)
 
 	// Part1
 	part, err := reader.NextPart()
@@ -416,7 +416,7 @@ func TestLineContinuation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("didn't get a part")
 		}
-		var buf strings.Builder
+		var buf bytes.Buffer
 		n, err := io.Copy(&buf, part)
 		if err != nil {
 			t.Errorf("error reading part: %v\nread so far: %q", err, buf.String())
@@ -446,7 +446,7 @@ func testQuotedPrintableEncoding(t *testing.T, cte string) {
 	if te, ok := part.Header["Content-Transfer-Encoding"]; ok {
 		t.Errorf("unexpected Content-Transfer-Encoding of %q", te)
 	}
-	var buf strings.Builder
+	var buf bytes.Buffer
 	_, err = io.Copy(&buf, part)
 	if err != nil {
 		t.Error(err)
@@ -484,7 +484,7 @@ Content-Transfer-Encoding: quoted-printable
 	if _, ok := part.Header["Content-Transfer-Encoding"]; !ok {
 		t.Errorf("missing Content-Transfer-Encoding")
 	}
-	var buf strings.Builder
+	var buf bytes.Buffer
 	_, err = io.Copy(&buf, part)
 	if err != nil {
 		t.Error(err)
@@ -993,7 +993,7 @@ func roundTripParseTest() parseTest {
 			formData("foo", "bar"),
 		},
 	}
-	var buf strings.Builder
+	var buf bytes.Buffer
 	w := NewWriter(&buf)
 	for _, p := range t.want {
 		pw, err := w.CreatePart(p.header)

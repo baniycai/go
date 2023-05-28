@@ -8,4 +8,4 @@
 
 package p
 
-var a [len(a)]int // ERROR "\[len\(a\)\]int|initialization cycle"
+var a [len(a)]int // ERROR "\[len\(a\)\]int|initialization loop"

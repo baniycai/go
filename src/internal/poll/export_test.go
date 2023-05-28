@@ -10,26 +10,26 @@ package poll
 
 var Consume = consume
 
-type XFDMutex struct {
+type FDMutex struct {
 	fdMutex
 }
 
-func (mu *XFDMutex) Incref() bool {
+func (mu *FDMutex) Incref() bool {
 	return mu.incref()
 }
 
-func (mu *XFDMutex) IncrefAndClose() bool {
+func (mu *FDMutex) IncrefAndClose() bool {
 	return mu.increfAndClose()
 }
 
-func (mu *XFDMutex) Decref() bool {
+func (mu *FDMutex) Decref() bool {
 	return mu.decref()
 }
 
-func (mu *XFDMutex) RWLock(read bool) bool {
+func (mu *FDMutex) RWLock(read bool) bool {
 	return mu.rwlock(read)
 }
 
-func (mu *XFDMutex) RWUnlock(read bool) bool {
+func (mu *FDMutex) RWUnlock(read bool) bool {
 	return mu.rwunlock(read)
 }

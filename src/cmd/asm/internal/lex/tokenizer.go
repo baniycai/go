@@ -5,7 +5,6 @@
 package lex
 
 import (
-	"go/build/constraint"
 	"io"
 	"os"
 	"strings"
@@ -110,7 +109,8 @@ func (t *Tokenizer) Next() ScanToken {
 		}
 		text := s.TokenText()
 		t.line += strings.Count(text, "\n")
-		if constraint.IsGoBuild(text) {
+		// TODO: Use constraint.IsGoBuild once #44505 fixed.
+		if strings.HasPrefix(text, "//go:build") {
 			t.tok = BuildComment
 			break
 		}

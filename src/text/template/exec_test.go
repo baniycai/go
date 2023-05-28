@@ -692,8 +692,6 @@ var execTests = []execTest{
 	{"bug18a", "{{eq . '.'}}", "true", '.', true},
 	{"bug18b", "{{eq . 'e'}}", "true", 'e', true},
 	{"bug18c", "{{eq . 'P'}}", "true", 'P', true},
-
-	{"issue56490", "{{$i := 0}}{{$x := 0}}{{range $i = .AI}}{{end}}{{$i}}", "5", tVal, true},
 }
 
 func zeroArgs() string {
@@ -774,7 +772,7 @@ func mapOfThree() any {
 }
 
 func testExecute(execTests []execTest, template *Template, t *testing.T) {
-	b := new(strings.Builder)
+	b := new(bytes.Buffer)
 	funcs := FuncMap{
 		"add":         add,
 		"count":       count,
@@ -863,7 +861,7 @@ func TestDelims(t *testing.T) {
 		if err != nil {
 			t.Fatalf("delim %q text %q parse err %s", left, text, err)
 		}
-		var b = new(strings.Builder)
+		var b = new(bytes.Buffer)
 		err = tmpl.Execute(b, value)
 		if err != nil {
 			t.Fatalf("delim %q exec err %s", left, err)
@@ -949,7 +947,7 @@ func TestJSEscaping(t *testing.T) {
 		{`'foo`, `\'foo`},
 		{`Go "jump" \`, `Go \"jump\" \\`},
 		{`Yukihiro says "今日は世界"`, `Yukihiro says \"今日は世界\"`},
-		{"unprintable \uFFFE", `unprintable \uFFFE`},
+		{"unprintable \uFDFF", `unprintable \uFDFF`},
 		{`<html>`, `\u003Chtml\u003E`},
 		{`no = in attributes`, `no \u003D in attributes`},
 		{`&#x27; does not become HTML entity`, `\u0026#x27; does not become HTML entity`},
@@ -1026,7 +1024,7 @@ func TestTree(t *testing.T) {
 	if err != nil {
 		t.Fatal("parse error:", err)
 	}
-	var b strings.Builder
+	var b bytes.Buffer
 	const expect = "[1[2[3[4]][5[6]]][7[8[9]][10[11]]]]"
 	// First by looking up the template.
 	err = tmpl.Lookup("tree").Execute(&b, tree)
@@ -1238,7 +1236,7 @@ var cmpTests = []cmpTest{
 }
 
 func TestComparison(t *testing.T) {
-	b := new(strings.Builder)
+	b := new(bytes.Buffer)
 	var cmpStruct = struct {
 		Uthree, Ufour    uint
 		NegOne, Three    int
@@ -1286,7 +1284,7 @@ func TestMissingMapKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var b strings.Builder
+	var b bytes.Buffer
 	// By default, just get "<no value>"
 	err = tmpl.Execute(&b, data)
 	if err != nil {
@@ -1456,7 +1454,7 @@ func TestBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var buf strings.Builder
+	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, "hello"); err != nil {
 		t.Fatal(err)
 	}
@@ -1562,7 +1560,7 @@ func TestAddrOfIndex(t *testing.T) {
 	}
 	for _, text := range texts {
 		tmpl := Must(New("tmpl").Parse(text))
-		var buf strings.Builder
+		var buf bytes.Buffer
 		err := tmpl.Execute(&buf, reflect.ValueOf([]V{{1}}))
 		if err != nil {
 			t.Fatalf("%s: Execute: %v", text, err)
@@ -1618,7 +1616,7 @@ func TestInterfaceValues(t *testing.T) {
 
 	for _, tt := range tests {
 		tmpl := Must(New("tmpl").Parse(tt.text))
-		var buf strings.Builder
+		var buf bytes.Buffer
 		err := tmpl.Execute(&buf, map[string]any{
 			"PlusOne": func(n int) int {
 				return n + 1
@@ -1711,7 +1709,7 @@ func TestExecutePanicDuringCall(t *testing.T) {
 // Issue 31810. Check that a parenthesized first argument behaves properly.
 func TestIssue31810(t *testing.T) {
 	// A simple value with no arguments is fine.
-	var b strings.Builder
+	var b bytes.Buffer
 	const text = "{{ (.)  }}"
 	tmpl, err := New("").Parse(text)
 	if err != nil {

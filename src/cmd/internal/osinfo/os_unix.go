@@ -2,11 +2,23 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build unix
+//go:build aix || darwin || dragonfly || freebsd || linux || netbsd || openbsd || solaris
 
 package osinfo
 
-import "golang.org/x/sys/unix"
+import (
+	"bytes"
+
+	"golang.org/x/sys/unix"
+)
+
+func utsString(b []byte) string {
+	i := bytes.IndexByte(b, 0)
+	if i == -1 {
+		return string(b)
+	}
+	return string(b[:i])
+}
 
 // Version returns the OS version name/number.
 func Version() (string, error) {
@@ -15,10 +27,10 @@ func Version() (string, error) {
 		return "", err
 	}
 
-	sysname := unix.ByteSliceToString(uts.Sysname[:])
-	release := unix.ByteSliceToString(uts.Release[:])
-	version := unix.ByteSliceToString(uts.Version[:])
-	machine := unix.ByteSliceToString(uts.Machine[:])
+	sysname := utsString(uts.Sysname[:])
+	release := utsString(uts.Release[:])
+	version := utsString(uts.Version[:])
+	machine := utsString(uts.Machine[:])
 
 	return sysname + " " + release + " " + version + " " + machine, nil
 }

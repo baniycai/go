@@ -1,7 +1,3 @@
-// Copyright 2015 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 package x86_test
 
 import (
@@ -9,7 +5,9 @@ import (
 	"bytes"
 	"fmt"
 	"internal/testenv"
+	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -83,7 +81,7 @@ func normalize(s string) string {
 }
 
 func asmOutput(t *testing.T, s string) []byte {
-	tmpdir, err := os.MkdirTemp("", "progedittest")
+	tmpdir, err := ioutil.TempDir("", "progedittest")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +95,7 @@ func asmOutput(t *testing.T, s string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := testenv.Command(t,
+	cmd := exec.Command(
 		testenv.GoToolPath(t), "tool", "asm", "-S", "-dynlink",
 		"-o", filepath.Join(tmpdir, "output.6"), tmpfile.Name())
 

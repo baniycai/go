@@ -12,8 +12,10 @@ import (
 	"internal/itoa"
 	"internal/oserror"
 	"internal/race"
+	"internal/unsafeheader"
 	"runtime"
 	"sync"
+	"unicode/utf16"
 	"unsafe"
 )
 
@@ -36,50 +38,24 @@ func StringToUTF16(s string) []uint16 {
 
 // UTF16FromString returns the UTF-16 encoding of the UTF-8 string
 // s, with a terminating NUL added. If s contains a NUL byte at any
-// location, it returns (nil, EINVAL). Unpaired surrogates
-// are encoded using WTF-8.
+// location, it returns (nil, EINVAL).
 func UTF16FromString(s string) ([]uint16, error) {
 	if bytealg.IndexByteString(s, 0) != -1 {
 		return nil, EINVAL
 	}
-	// Valid UTF-8 characters between 1 and 3 bytes require one uint16.
-	// Valid UTF-8 characters of 4 bytes require two uint16.
-	// Bytes with invalid UTF-8 encoding require maximum one uint16 per byte.
-	// So the number of UTF-8 code units (len(s)) is always greater or
-	// equal than the number of UTF-16 code units.
-	// Also account for the terminating NUL character.
-	buf := make([]uint16, 0, len(s)+1)
-	buf = encodeWTF16(s, buf)
-	return append(buf, 0), nil
+	return utf16.Encode([]rune(s + "\x00")), nil
 }
 
 // UTF16ToString returns the UTF-8 encoding of the UTF-16 sequence s,
-// with a terminating NUL removed. Unpaired surrogates are decoded
-// using WTF-8 instead of UTF-8 encoding.
+// with a terminating NUL removed.
 func UTF16ToString(s []uint16) string {
-	maxLen := 0
 	for i, v := range s {
 		if v == 0 {
 			s = s[0:i]
 			break
 		}
-		switch {
-		case v <= rune1Max:
-			maxLen += 1
-		case v <= rune2Max:
-			maxLen += 2
-		default:
-			// r is a non-surrogate that decodes to 3 bytes,
-			// or is an unpaired surrogate (also 3 bytes in WTF-8),
-			// or is one half of a valid surrogate pair.
-			// If it is half of a pair, we will add 3 for the second surrogate
-			// (total of 6) and overestimate by 2 bytes for the pair,
-			// since the resulting rune only requires 4 bytes.
-			maxLen += 3
-		}
 	}
-	buf := decodeWTF16(s, make([]byte, 0, maxLen))
-	return unsafe.String(unsafe.SliceData(buf), len(buf))
+	return string(utf16.Decode(s))
 }
 
 // utf16PtrToString is like UTF16ToString, but takes *uint16
@@ -88,13 +64,21 @@ func utf16PtrToString(p *uint16) string {
 	if p == nil {
 		return ""
 	}
+	// Find NUL terminator.
 	end := unsafe.Pointer(p)
 	n := 0
 	for *(*uint16)(end) != 0 {
 		end = unsafe.Pointer(uintptr(end) + unsafe.Sizeof(*p))
 		n++
 	}
-	return UTF16ToString(unsafe.Slice(p, n))
+	// Turn *uint16 into []uint16.
+	var s []uint16
+	hdr := (*unsafeheader.Slice)(unsafe.Pointer(&s))
+	hdr.Data = unsafe.Pointer(p)
+	hdr.Cap = n
+	hdr.Len = n
+	// Decode []uint16 into string.
+	return string(utf16.Decode(s))
 }
 
 // StringToUTF16Ptr returns pointer to the UTF-16 encoding of
@@ -108,7 +92,6 @@ func StringToUTF16Ptr(s string) *uint16 { return &StringToUTF16(s)[0] }
 // UTF16PtrFromString returns pointer to the UTF-16 encoding of
 // the UTF-8 string s, with a terminating NUL added. If s
 // contains a NUL byte at any location, it returns (nil, EINVAL).
-// Unpaired surrogates are encoded using WTF-8.
 func UTF16PtrFromString(s string) (*uint16, error) {
 	a, err := UTF16FromString(s)
 	if err != nil {
@@ -119,8 +102,8 @@ func UTF16PtrFromString(s string) (*uint16, error) {
 
 // Errno is the Windows error number.
 //
-// Errno values can be tested against error values using errors.Is.
-// For example:
+// Errno values can be tested against error values from the os package
+// using errors.Is. For example:
 //
 //	_, _, err := syscall.Syscall(...)
 //	if errors.Is(err, fs.ErrNotExist) ...
@@ -155,40 +138,23 @@ func (e Errno) Error() string {
 	// trim terminating \r and \n
 	for ; n > 0 && (b[n-1] == '\n' || b[n-1] == '\r'); n-- {
 	}
-	return UTF16ToString(b[:n])
+	return string(utf16.Decode(b[:n]))
 }
 
-const (
-	_ERROR_NOT_ENOUGH_MEMORY    = Errno(8)
-	_ERROR_NOT_SUPPORTED        = Errno(50)
-	_ERROR_BAD_NETPATH          = Errno(53)
-	_ERROR_CALL_NOT_IMPLEMENTED = Errno(120)
-)
+const _ERROR_BAD_NETPATH = Errno(53)
 
 func (e Errno) Is(target error) bool {
 	switch target {
 	case oserror.ErrPermission:
-		return e == ERROR_ACCESS_DENIED ||
-			e == EACCES ||
-			e == EPERM
+		return e == ERROR_ACCESS_DENIED
 	case oserror.ErrExist:
 		return e == ERROR_ALREADY_EXISTS ||
 			e == ERROR_DIR_NOT_EMPTY ||
-			e == ERROR_FILE_EXISTS ||
-			e == EEXIST ||
-			e == ENOTEMPTY
+			e == ERROR_FILE_EXISTS
 	case oserror.ErrNotExist:
 		return e == ERROR_FILE_NOT_FOUND ||
 			e == _ERROR_BAD_NETPATH ||
-			e == ERROR_PATH_NOT_FOUND ||
-			e == ENOENT
-	case errorspkg.ErrUnsupported:
-		return e == _ERROR_NOT_SUPPORTED ||
-			e == _ERROR_CALL_NOT_IMPLEMENTED ||
-			e == ENOSYS ||
-			e == ENOTSUP ||
-			e == EOPNOTSUPP ||
-			e == EWINDOWS
+			e == ERROR_PATH_NOT_FOUND
 	}
 	return false
 }
@@ -328,7 +294,6 @@ func NewCallbackCDecl(fn any) uintptr {
 //sys	initializeProcThreadAttributeList(attrlist *_PROC_THREAD_ATTRIBUTE_LIST, attrcount uint32, flags uint32, size *uintptr) (err error) = InitializeProcThreadAttributeList
 //sys	deleteProcThreadAttributeList(attrlist *_PROC_THREAD_ATTRIBUTE_LIST) = DeleteProcThreadAttributeList
 //sys	updateProcThreadAttribute(attrlist *_PROC_THREAD_ATTRIBUTE_LIST, flags uint32, attr uintptr, value unsafe.Pointer, size uintptr, prevvalue unsafe.Pointer, returnedsize *uintptr) (err error) = UpdateProcThreadAttribute
-//sys	getFinalPathNameByHandle(file Handle, filePath *uint16, filePathSize uint32, flags uint32) (n uint32, err error) [n == 0 || n >= filePathSize] = kernel32.GetFinalPathNameByHandleW
 
 // syscall interface implementation for other packages
 
@@ -405,11 +370,8 @@ func Open(path string, mode int, perm uint32) (fd Handle, err error) {
 			}
 		}
 	}
-	if createmode == OPEN_EXISTING && access == GENERIC_READ {
-		// Necessary for opening directory handles.
-		attrs |= FILE_FLAG_BACKUP_SEMANTICS
-	}
-	return CreateFile(pathp, access, sharemode, sa, createmode, attrs, 0)
+	h, e := CreateFile(pathp, access, sharemode, sa, createmode, attrs, 0)
+	return h, e
 }
 
 func Read(fd Handle, p []byte) (n int, err error) {
@@ -510,6 +472,11 @@ func Seek(fd Handle, offset int64, whence int) (newoffset int64, err error) {
 	case 2:
 		w = FILE_END
 	}
+	// use GetFileType to check pipe, pipe can't do seek
+	ft, _ := GetFileType(fd)
+	if ft == FILE_TYPE_PIPE {
+		return 0, ESPIPE
+	}
 	err = setFilePointerEx(fd, offset, &newoffset, w)
 	return
 }
@@ -537,7 +504,7 @@ func Getwd() (wd string, err error) {
 	if e != nil {
 		return "", e
 	}
-	return UTF16ToString(b[0:n]), nil
+	return string(utf16.Decode(b[0:n])), nil
 }
 
 func Chdir(path string) (err error) {
@@ -585,13 +552,13 @@ func Rename(oldpath, newpath string) (err error) {
 }
 
 func ComputerName() (name string, err error) {
-	b := make([]uint16, MAX_COMPUTERNAME_LENGTH+1)
-	var n uint32
+	var n uint32 = MAX_COMPUTERNAME_LENGTH + 1
+	b := make([]uint16, n)
 	e := GetComputerName(&b[0], &n)
 	if e != nil {
 		return "", e
 	}
-	return UTF16ToString(b[:n]), nil
+	return string(utf16.Decode(b[0:n])), nil
 }
 
 func Ftruncate(fd Handle, length int64) (err error) {
@@ -647,19 +614,10 @@ func Utimes(path string, tv []Timeval) (err error) {
 		return e
 	}
 	defer Close(h)
-	a := Filetime{}
-	w := Filetime{}
-	if tv[0].Nanoseconds() != 0 {
-		a = NsecToFiletime(tv[0].Nanoseconds())
-	}
-	if tv[0].Nanoseconds() != 0 {
-		w = NsecToFiletime(tv[1].Nanoseconds())
-	}
+	a := NsecToFiletime(tv[0].Nanoseconds())
+	w := NsecToFiletime(tv[1].Nanoseconds())
 	return SetFileTime(h, nil, &a, &w)
 }
-
-// This matches the value in os/file_windows.go.
-const _UTIME_OMIT = -1
 
 func UtimesNano(path string, ts []Timespec) (err error) {
 	if len(ts) != 2 {
@@ -676,14 +634,8 @@ func UtimesNano(path string, ts []Timespec) (err error) {
 		return e
 	}
 	defer Close(h)
-	a := Filetime{}
-	w := Filetime{}
-	if ts[0].Nsec != _UTIME_OMIT {
-		a = NsecToFiletime(TimespecToNsec(ts[0]))
-	}
-	if ts[1].Nsec != _UTIME_OMIT {
-		w = NsecToFiletime(TimespecToNsec(ts[1]))
-	}
+	a := NsecToFiletime(TimespecToNsec(ts[0]))
+	w := NsecToFiletime(TimespecToNsec(ts[1]))
 	return SetFileTime(h, nil, &a, &w)
 }
 
@@ -884,7 +836,8 @@ func (rsa *RawSockaddrAny) Sockaddr() (Sockaddr, error) {
 		for n < len(pp.Path) && pp.Path[n] != 0 {
 			n++
 		}
-		sa.Name = string(unsafe.Slice((*byte)(unsafe.Pointer(&pp.Path[0])), n))
+		bytes := (*[len(pp.Path)]byte)(unsafe.Pointer(&pp.Path[0]))[0:n:n]
+		sa.Name = string(bytes)
 		return sa, nil
 
 	case AF_INET:
@@ -962,13 +915,9 @@ func Shutdown(fd Handle, how int) (err error) {
 }
 
 func WSASendto(s Handle, bufs *WSABuf, bufcnt uint32, sent *uint32, flags uint32, to Sockaddr, overlapped *Overlapped, croutine *byte) (err error) {
-	var rsa unsafe.Pointer
-	var len int32
-	if to != nil {
-		rsa, len, err = to.sockaddr()
-		if err != nil {
-			return err
-		}
+	rsa, len, err := to.sockaddr()
+	if err != nil {
+		return err
 	}
 	r1, _, e1 := Syscall9(procWSASendTo.Addr(), 9, uintptr(s), uintptr(unsafe.Pointer(bufs)), uintptr(bufcnt), uintptr(unsafe.Pointer(sent)), uintptr(flags), uintptr(unsafe.Pointer(rsa)), uintptr(len), uintptr(unsafe.Pointer(overlapped)), uintptr(unsafe.Pointer(croutine)))
 	if r1 == socket_error {
@@ -1221,47 +1170,8 @@ func Getppid() (ppid int) {
 	return int(pe.ParentProcessID)
 }
 
-func fdpath(fd Handle, buf []uint16) ([]uint16, error) {
-	const (
-		FILE_NAME_NORMALIZED = 0
-		VOLUME_NAME_DOS      = 0
-	)
-	for {
-		n, err := getFinalPathNameByHandle(fd, &buf[0], uint32(len(buf)), FILE_NAME_NORMALIZED|VOLUME_NAME_DOS)
-		if err == nil {
-			buf = buf[:n]
-			break
-		}
-		if err != _ERROR_NOT_ENOUGH_MEMORY {
-			return nil, err
-		}
-		buf = append(buf, make([]uint16, n-uint32(len(buf)))...)
-	}
-	return buf, nil
-}
-
-func Fchdir(fd Handle) (err error) {
-	var buf [MAX_PATH + 1]uint16
-	path, err := fdpath(fd, buf[:])
-	if err != nil {
-		return err
-	}
-	// When using VOLUME_NAME_DOS, the path is always pefixed by "\\?\".
-	// That prefix tells the Windows APIs to disable all string parsing and to send
-	// the string that follows it straight to the file system.
-	// Although SetCurrentDirectory and GetCurrentDirectory do support the "\\?\" prefix,
-	// some other Windows APIs don't. If the prefix is not removed here, it will leak
-	// to Getwd, and we don't want such a general-purpose function to always return a
-	// path with the "\\?\" prefix after Fchdir is called.
-	// The downside is that APIs that do support it will parse the path and try to normalize it,
-	// when it's already normalized.
-	if len(path) >= 4 && path[0] == '\\' && path[1] == '\\' && path[2] == '?' && path[3] == '\\' {
-		path = path[4:]
-	}
-	return SetCurrentDirectory(&path[0])
-}
-
 // TODO(brainman): fix all needed for os
+func Fchdir(fd Handle) (err error)             { return EWINDOWS }
 func Link(oldpath, newpath string) (err error) { return EWINDOWS }
 func Symlink(path, link string) (err error)    { return EWINDOWS }
 

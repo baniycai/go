@@ -76,7 +76,7 @@ type Func struct {
 
 	// methods
 	// (for functions, these fields have the respective zero value)
-	Recv  string // actual   receiver "T" or "*T" possibly followed by type parameters [P1, ..., Pn]
+	Recv  string // actual   receiver "T" or "*T"
 	Orig  string // original receiver "T" or "*T"
 	Level int    // embedding level; 0 means not embedded
 
@@ -173,11 +173,7 @@ func (p *Package) collectTypes(types []*Type) {
 func (p *Package) collectFuncs(funcs []*Func) {
 	for _, f := range funcs {
 		if f.Recv != "" {
-			r := strings.TrimPrefix(f.Recv, "*")
-			if i := strings.IndexByte(r, '['); i >= 0 {
-				r = r[:i] // remove type parameters
-			}
-			p.syms[r+"."+f.Name] = true
+			p.syms[strings.TrimPrefix(f.Recv, "*")+"."+f.Name] = true
 		} else {
 			p.syms[f.Name] = true
 		}

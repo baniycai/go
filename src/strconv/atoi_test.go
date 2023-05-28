@@ -164,7 +164,6 @@ var parseInt64Tests = []parseInt64Test{
 	{"_12345", 0, ErrSyntax},
 	{"1__2345", 0, ErrSyntax},
 	{"12345_", 0, ErrSyntax},
-	{"123%45", 0, ErrSyntax},
 }
 
 type parseInt64BaseTest struct {
@@ -303,7 +302,6 @@ var parseInt32Tests = []parseInt32Test{
 	{"_12345", 0, ErrSyntax},
 	{"1__2345", 0, ErrSyntax},
 	{"12345_", 0, ErrSyntax},
-	{"123%45", 0, ErrSyntax},
 }
 
 type numErrorTest struct {

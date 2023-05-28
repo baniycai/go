@@ -14,9 +14,11 @@ import (
 
 func TestErrProcessDone(t *testing.T) {
 	testenv.MustHaveGoBuild(t)
-	t.Parallel()
-
-	p, err := StartProcess(testenv.GoToolPath(t), []string{"go"}, &ProcAttr{})
+	path, err := testenv.GoTool()
+	if err != nil {
+		t.Errorf("finding go tool: %v", err)
+	}
+	p, err := StartProcess(path, []string{"go"}, &ProcAttr{})
 	if err != nil {
 		t.Errorf("starting test process: %v", err)
 	}

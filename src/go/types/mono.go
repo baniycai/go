@@ -7,7 +7,6 @@ package types
 import (
 	"go/ast"
 	"go/token"
-	. "internal/types/errors"
 )
 
 // This file implements a check to validate that a Go package doesn't
@@ -139,7 +138,7 @@ func (check *Checker) reportInstanceLoop(v int) {
 	// TODO(mdempsky): Pivot stack so we report the cycle from the top?
 
 	obj0 := check.mono.vertices[v].obj
-	check.error(obj0, InvalidInstanceCycle, "instantiation cycle:")
+	check.errorf(obj0, _InvalidInstanceCycle, "instantiation cycle:")
 
 	qf := RelativeTo(check.pkg)
 	for _, v := range stack {
@@ -150,9 +149,9 @@ func (check *Checker) reportInstanceLoop(v int) {
 		default:
 			panic("unexpected type")
 		case *Named:
-			check.errorf(atPos(edge.pos), InvalidInstanceCycle, "\t%s implicitly parameterized by %s", obj.Name(), TypeString(edge.typ, qf)) // secondary error, \t indented
+			check.errorf(atPos(edge.pos), _InvalidInstanceCycle, "\t%s implicitly parameterized by %s", obj.Name(), TypeString(edge.typ, qf)) // secondary error, \t indented
 		case *TypeParam:
-			check.errorf(atPos(edge.pos), InvalidInstanceCycle, "\t%s instantiated as %s", obj.Name(), TypeString(edge.typ, qf)) // secondary error, \t indented
+			check.errorf(atPos(edge.pos), _InvalidInstanceCycle, "\t%s instantiated as %s", obj.Name(), TypeString(edge.typ, qf)) // secondary error, \t indented
 		}
 	}
 }
@@ -282,7 +281,7 @@ func (w *monoGraph) localNamedVertex(pkg *Package, named *Named) int {
 	// parameters that it's implicitly parameterized by.
 	for scope := obj.Parent(); scope != root; scope = scope.Parent() {
 		for _, elem := range scope.elems {
-			if elem, ok := elem.(*TypeName); ok && !elem.IsAlias() && cmpPos(elem.Pos(), obj.Pos()) < 0 {
+			if elem, ok := elem.(*TypeName); ok && !elem.IsAlias() && elem.Pos() < obj.Pos() {
 				if tpar, ok := elem.Type().(*TypeParam); ok {
 					if idx < 0 {
 						idx = len(w.vertices)

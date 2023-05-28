@@ -8,19 +8,20 @@
 package fuzz
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"internal/godebug"
 	"io"
+	"io/ioutil"
 	"math/bits"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -117,15 +118,6 @@ func CoordinateFuzzing(ctx context.Context, opts CoordinateFuzzingOpts) (err err
 	var fuzzErr error
 	stopping := false
 	stop := func(err error) {
-		if shouldPrintDebugInfo() {
-			_, file, line, ok := runtime.Caller(1)
-			if ok {
-				c.debugLogf("stop called at %s:%d. stopping: %t", file, line, stopping)
-			} else {
-				c.debugLogf("stop called at unknown. stopping: %t", stopping)
-			}
-		}
-
 		if err == fuzzCtx.Err() || isInterruptError(err) {
 			// Suppress cancellation errors and terminations due to SIGINT.
 			// The messages are not helpful since either the user triggered the error
@@ -204,11 +196,6 @@ func CoordinateFuzzing(ctx context.Context, opts CoordinateFuzzingOpts) (err err
 
 	c.logStats()
 	for {
-		// If there is an execution limit, and we've reached it, stop.
-		if c.opts.Limit > 0 && c.count >= c.opts.Limit {
-			stop(nil)
-		}
-
 		var inputC chan fuzzInput
 		input, ok := c.peekInput()
 		if ok && c.crashMinimizing == nil && !stopping {
@@ -253,9 +240,6 @@ func CoordinateFuzzing(ctx context.Context, opts CoordinateFuzzingOpts) (err err
 					if c.crashMinimizing != nil {
 						// This crash is not minimized, and another crash is being minimized.
 						// Ignore this one and wait for the other one to finish.
-						if shouldPrintDebugInfo() {
-							c.debugLogf("found unminimized crasher, skipping in favor of minimizable crasher")
-						}
 						break
 					}
 					// Found a crasher but haven't yet attempted to minimize it.
@@ -276,8 +260,10 @@ func CoordinateFuzzing(ctx context.Context, opts CoordinateFuzzingOpts) (err err
 						}
 					}
 					if shouldPrintDebugInfo() {
-						c.debugLogf(
-							"found crasher, id: %s, parent: %s, gen: %d, size: %d, exec time: %s",
+						fmt.Fprintf(
+							c.opts.Log,
+							"DEBUG new crasher, elapsed: %s, id: %s, parent: %s, gen: %d, size: %d, exec time: %s\n",
+							c.elapsed(),
 							result.entry.Path,
 							result.entry.Parent,
 							result.entry.Generation,
@@ -290,8 +276,10 @@ func CoordinateFuzzing(ctx context.Context, opts CoordinateFuzzingOpts) (err err
 			} else if result.coverageData != nil {
 				if c.warmupRun() {
 					if shouldPrintDebugInfo() {
-						c.debugLogf(
-							"processed an initial input, id: %s, new bits: %d, size: %d, exec time: %s",
+						fmt.Fprintf(
+							c.opts.Log,
+							"DEBUG processed an initial input, elapsed: %s, id: %s, new bits: %d, size: %d, exec time: %s\n",
+							c.elapsed(),
 							result.entry.Parent,
 							countBits(diffCoverage(c.coverageMask, result.coverageData)),
 							len(result.entry.Data),
@@ -303,8 +291,10 @@ func CoordinateFuzzing(ctx context.Context, opts CoordinateFuzzingOpts) (err err
 					if c.warmupInputLeft == 0 {
 						fmt.Fprintf(c.opts.Log, "fuzz: elapsed: %s, gathering baseline coverage: %d/%d completed, now fuzzing with %d workers\n", c.elapsed(), c.warmupInputCount, c.warmupInputCount, c.opts.Parallel)
 						if shouldPrintDebugInfo() {
-							c.debugLogf(
-								"finished processing input corpus, entries: %d, initial coverage bits: %d",
+							fmt.Fprintf(
+								c.opts.Log,
+								"DEBUG finished processing input corpus, elapsed: %s, entries: %d, initial coverage bits: %d\n",
+								c.elapsed(),
 								len(c.corpus.entries),
 								countBits(c.coverageMask),
 							)
@@ -332,20 +322,16 @@ func CoordinateFuzzing(ctx context.Context, opts CoordinateFuzzingOpts) (err err
 							break
 						}
 						if !entryNew {
-							if shouldPrintDebugInfo() {
-								c.debugLogf(
-									"ignoring duplicate input which increased coverage, id: %s",
-									result.entry.Path,
-								)
-							}
-							break
+							continue
 						}
 						c.updateCoverage(keepCoverage)
 						c.inputQueue.enqueue(result.entry)
 						c.interestingCount++
 						if shouldPrintDebugInfo() {
-							c.debugLogf(
-								"new interesting input, id: %s, parent: %s, gen: %d, new bits: %d, total bits: %d, size: %d, exec time: %s",
+							fmt.Fprintf(
+								c.opts.Log,
+								"DEBUG new interesting input, elapsed: %s, id: %s, parent: %s, gen: %d, new bits: %d, total bits: %d, size: %d, exec time: %s\n",
+								c.elapsed(),
 								result.entry.Path,
 								result.entry.Parent,
 								result.entry.Generation,
@@ -358,8 +344,10 @@ func CoordinateFuzzing(ctx context.Context, opts CoordinateFuzzingOpts) (err err
 					}
 				} else {
 					if shouldPrintDebugInfo() {
-						c.debugLogf(
-							"worker reported interesting input that doesn't expand coverage, id: %s, parent: %s, canMinimize: %t",
+						fmt.Fprintf(
+							c.opts.Log,
+							"DEBUG worker reported interesting input that doesn't expand coverage, elapsed: %s, id: %s, parent: %s, canMinimize: %t\n",
+							c.elapsed(),
 							result.entry.Path,
 							result.entry.Parent,
 							result.canMinimize,
@@ -373,12 +361,20 @@ func CoordinateFuzzing(ctx context.Context, opts CoordinateFuzzingOpts) (err err
 				if c.warmupInputLeft == 0 {
 					fmt.Fprintf(c.opts.Log, "fuzz: elapsed: %s, testing seed corpus: %d/%d completed, now fuzzing with %d workers\n", c.elapsed(), c.warmupInputCount, c.warmupInputCount, c.opts.Parallel)
 					if shouldPrintDebugInfo() {
-						c.debugLogf(
-							"finished testing-only phase, entries: %d",
+						fmt.Fprintf(
+							c.opts.Log,
+							"DEBUG finished testing-only phase, elapsed: %s, entries: %d\n",
+							time.Since(c.startTime),
 							len(c.corpus.entries),
 						)
 					}
 				}
+			}
+
+			// Once the result has been processed, stop the worker if we
+			// have reached the fuzzing limit.
+			if c.opts.Limit > 0 && c.count >= c.opts.Limit {
+				stop(nil)
 			}
 
 		case inputC <- input:
@@ -780,7 +776,8 @@ func (c *coordinator) peekInput() (fuzzInput, bool) {
 		warmup:  c.warmupRun(),
 	}
 	if c.coverageMask != nil {
-		input.coverageData = bytes.Clone(c.coverageMask)
+		input.coverageData = make([]byte, len(c.coverageMask))
+		copy(input.coverageData, c.coverageMask)
 	}
 	if input.warmup {
 		// No fuzzing will occur, but it should count toward the limit set by
@@ -819,15 +816,6 @@ func (c *coordinator) refillInputQueue() {
 // queueForMinimization creates a fuzzMinimizeInput from result and adds it
 // to the minimization queue to be sent to workers.
 func (c *coordinator) queueForMinimization(result fuzzResult, keepCoverage []byte) {
-	if shouldPrintDebugInfo() {
-		c.debugLogf(
-			"queueing input for minimization, id: %s, parent: %s, keepCoverage: %t, crasher: %t",
-			result.entry.Path,
-			result.entry.Parent,
-			keepCoverage != nil,
-			result.crasherMsg != "",
-		)
-	}
 	if result.crasherMsg != "" {
 		c.minimizeQueue.clear()
 	}
@@ -975,7 +963,7 @@ func (e *MalformedCorpusError) Error() string {
 // be saved in a MalformedCorpusError and returned, along with the most recent
 // error.
 func ReadCorpus(dir string, types []reflect.Type) ([]CorpusEntry, error) {
-	files, err := os.ReadDir(dir)
+	files, err := ioutil.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil, nil // No corpus to read
 	} else if err != nil {
@@ -993,7 +981,7 @@ func ReadCorpus(dir string, types []reflect.Type) ([]CorpusEntry, error) {
 			continue
 		}
 		filename := filepath.Join(dir, file.Name())
-		data, err := os.ReadFile(filename)
+		data, err := ioutil.ReadFile(filename)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read corpus file: %v", err)
 		}
@@ -1045,12 +1033,12 @@ func CheckCorpus(vals []any, types []reflect.Type) error {
 // writeToCorpus will not rewrite it. writeToCorpus sets entry.Path to the new
 // file that was just written or an error if it failed.
 func writeToCorpus(entry *CorpusEntry, dir string) (err error) {
-	sum := fmt.Sprintf("%x", sha256.Sum256(entry.Data))[:16]
+	sum := fmt.Sprintf("%x", sha256.Sum256(entry.Data))
 	entry.Path = filepath.Join(dir, sum)
 	if err := os.MkdirAll(dir, 0777); err != nil {
 		return err
 	}
-	if err := os.WriteFile(entry.Path, entry.Data, 0666); err != nil {
+	if err := ioutil.WriteFile(entry.Path, entry.Data, 0666); err != nil {
 		os.Remove(entry.Path) // remove partially written file
 		return err
 	}
@@ -1090,13 +1078,14 @@ var zeroVals []any = []any{
 	uint64(0),
 }
 
-var debugInfo = godebug.New("#fuzzdebug").Value() == "1"
+var (
+	debugInfo     bool
+	debugInfoOnce sync.Once
+)
 
 func shouldPrintDebugInfo() bool {
+	debugInfoOnce.Do(func() {
+		debugInfo = godebug.Get("fuzzdebug") == "1"
+	})
 	return debugInfo
-}
-
-func (c *coordinator) debugLogf(format string, args ...any) {
-	t := time.Now().Format("2006-01-02 15:04:05.999999999")
-	fmt.Fprintf(c.opts.Log, t+" DEBUG "+format+"\n", args...)
 }

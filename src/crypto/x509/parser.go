@@ -1,13 +1,11 @@
 // Copyright 2021 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
-
 package x509
 
 import (
 	"bytes"
 	"crypto/dsa"
-	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -214,15 +212,13 @@ func parseExtension(der cryptobyte.String) (pkix.Extension, error) {
 	return ext, nil
 }
 
-func parsePublicKey(keyData *publicKeyInfo) (any, error) {
-	oid := keyData.Algorithm.Algorithm
-	params := keyData.Algorithm.Parameters
+func parsePublicKey(algo PublicKeyAlgorithm, keyData *publicKeyInfo) (any, error) {
 	der := cryptobyte.String(keyData.PublicKey.RightAlign())
-	switch {
-	case oid.Equal(oidPublicKeyRSA):
+	switch algo {
+	case RSA:
 		// RSA public keys must have a NULL in the parameters.
 		// See RFC 3279, Section 2.3.1.
-		if !bytes.Equal(params.FullBytes, asn1.NullBytes) {
+		if !bytes.Equal(keyData.Algorithm.Parameters.FullBytes, asn1.NullBytes) {
 			return nil, errors.New("x509: RSA key missing NULL parameters")
 		}
 
@@ -249,8 +245,8 @@ func parsePublicKey(keyData *publicKeyInfo) (any, error) {
 			N: p.N,
 		}
 		return pub, nil
-	case oid.Equal(oidPublicKeyECDSA):
-		paramsDer := cryptobyte.String(params.FullBytes)
+	case ECDSA:
+		paramsDer := cryptobyte.String(keyData.Algorithm.Parameters.FullBytes)
 		namedCurveOID := new(asn1.ObjectIdentifier)
 		if !paramsDer.ReadASN1ObjectIdentifier(namedCurveOID) {
 			return nil, errors.New("x509: invalid ECDSA parameters")
@@ -269,24 +265,17 @@ func parsePublicKey(keyData *publicKeyInfo) (any, error) {
 			Y:     y,
 		}
 		return pub, nil
-	case oid.Equal(oidPublicKeyEd25519):
+	case Ed25519:
 		// RFC 8410, Section 3
 		// > For all of the OIDs, the parameters MUST be absent.
-		if len(params.FullBytes) != 0 {
+		if len(keyData.Algorithm.Parameters.FullBytes) != 0 {
 			return nil, errors.New("x509: Ed25519 key encoded with illegal parameters")
 		}
 		if len(der) != ed25519.PublicKeySize {
 			return nil, errors.New("x509: wrong Ed25519 public key size")
 		}
 		return ed25519.PublicKey(der), nil
-	case oid.Equal(oidPublicKeyX25519):
-		// RFC 8410, Section 3
-		// > For all of the OIDs, the parameters MUST be absent.
-		if len(params.FullBytes) != 0 {
-			return nil, errors.New("x509: X25519 key encoded with illegal parameters")
-		}
-		return ecdh.X25519().NewPublicKey(der)
-	case oid.Equal(oidPublicKeyDSA):
+	case DSA:
 		y := new(big.Int)
 		if !der.ReadASN1Integer(y) {
 			return nil, errors.New("x509: invalid DSA public key")
@@ -299,7 +288,7 @@ func parsePublicKey(keyData *publicKeyInfo) (any, error) {
 				G: new(big.Int),
 			},
 		}
-		paramsDer := cryptobyte.String(params.FullBytes)
+		paramsDer := cryptobyte.String(keyData.Algorithm.Parameters.FullBytes)
 		if !paramsDer.ReadASN1(&paramsDer, cryptobyte_asn1.SEQUENCE) ||
 			!paramsDer.ReadASN1Integer(pub.Parameters.P) ||
 			!paramsDer.ReadASN1Integer(pub.Parameters.Q) ||
@@ -312,7 +301,7 @@ func parsePublicKey(keyData *publicKeyInfo) (any, error) {
 		}
 		return pub, nil
 	default:
-		return nil, errors.New("x509: unknown public key algorithm")
+		return nil, nil
 	}
 }
 
@@ -334,17 +323,17 @@ func parseKeyUsageExtension(der cryptobyte.String) (KeyUsage, error) {
 func parseBasicConstraintsExtension(der cryptobyte.String) (bool, int, error) {
 	var isCA bool
 	if !der.ReadASN1(&der, cryptobyte_asn1.SEQUENCE) {
-		return false, 0, errors.New("x509: invalid basic constraints")
+		return false, 0, errors.New("x509: invalid basic constraints a")
 	}
 	if der.PeekASN1Tag(cryptobyte_asn1.BOOLEAN) {
 		if !der.ReadASN1Boolean(&isCA) {
-			return false, 0, errors.New("x509: invalid basic constraints")
+			return false, 0, errors.New("x509: invalid basic constraints b")
 		}
 	}
 	maxPathLen := -1
-	if der.PeekASN1Tag(cryptobyte_asn1.INTEGER) {
+	if !der.Empty() && der.PeekASN1Tag(cryptobyte_asn1.INTEGER) {
 		if !der.ReadASN1Integer(&maxPathLen) {
-			return false, 0, errors.New("x509: invalid basic constraints")
+			return false, 0, errors.New("x509: invalid basic constraints c")
 		}
 	}
 
@@ -919,14 +908,12 @@ func parseCertificate(der []byte) (*Certificate, error) {
 	if !spki.ReadASN1BitString(&spk) {
 		return nil, errors.New("x509: malformed subjectPublicKey")
 	}
-	if cert.PublicKeyAlgorithm != UnknownPublicKeyAlgorithm {
-		cert.PublicKey, err = parsePublicKey(&publicKeyInfo{
-			Algorithm: pkAI,
-			PublicKey: spk,
-		})
-		if err != nil {
-			return nil, err
-		}
+	cert.PublicKey, err = parsePublicKey(cert.PublicKeyAlgorithm, &publicKeyInfo{
+		Algorithm: pkAI,
+		PublicKey: spk,
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	if cert.Version > 1 {
@@ -1104,22 +1091,16 @@ func ParseRevocationList(der []byte) (*RevocationList, error) {
 			return nil, errors.New("x509: malformed crl")
 		}
 		for !revokedSeq.Empty() {
-			rce := RevocationListEntry{}
-
 			var certSeq cryptobyte.String
-			if !revokedSeq.ReadASN1Element(&certSeq, cryptobyte_asn1.SEQUENCE) {
+			if !revokedSeq.ReadASN1(&certSeq, cryptobyte_asn1.SEQUENCE) {
 				return nil, errors.New("x509: malformed crl")
 			}
-			rce.Raw = certSeq
-			if !certSeq.ReadASN1(&certSeq, cryptobyte_asn1.SEQUENCE) {
-				return nil, errors.New("x509: malformed crl")
-			}
-
-			rce.SerialNumber = new(big.Int)
-			if !certSeq.ReadASN1Integer(rce.SerialNumber) {
+			rc := pkix.RevokedCertificate{}
+			rc.SerialNumber = new(big.Int)
+			if !certSeq.ReadASN1Integer(rc.SerialNumber) {
 				return nil, errors.New("x509: malformed serial number")
 			}
-			rce.RevocationTime, err = parseTime(&certSeq)
+			rc.RevocationTime, err = parseTime(&certSeq)
 			if err != nil {
 				return nil, err
 			}
@@ -1138,23 +1119,11 @@ func ParseRevocationList(der []byte) (*RevocationList, error) {
 					if err != nil {
 						return nil, err
 					}
-					if ext.Id.Equal(oidExtensionReasonCode) {
-						val := cryptobyte.String(ext.Value)
-						if !val.ReadASN1Enum(&rce.ReasonCode) {
-							return nil, fmt.Errorf("x509: malformed reasonCode extension")
-						}
-					}
-					rce.Extensions = append(rce.Extensions, ext)
+					rc.Extensions = append(rc.Extensions, ext)
 				}
 			}
 
-			rl.RevokedCertificateEntries = append(rl.RevokedCertificateEntries, rce)
-			rcDeprecated := pkix.RevokedCertificate{
-				SerialNumber:   rce.SerialNumber,
-				RevocationTime: rce.RevocationTime,
-				Extensions:     rce.Extensions,
-			}
-			rl.RevokedCertificates = append(rl.RevokedCertificates, rcDeprecated)
+			rl.RevokedCertificates = append(rl.RevokedCertificates, rc)
 		}
 	}
 

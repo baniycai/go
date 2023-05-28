@@ -119,9 +119,7 @@ func TestZipSums(t *testing.T) {
 		name := fmt.Sprintf("%s@%s", strings.ReplaceAll(test.m.Path, "/", "_"), test.m.Version)
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			ctx := context.Background()
-
-			zipPath, err := modfetch.DownloadZip(ctx, test.m)
+			zipPath, err := modfetch.DownloadZip(context.Background(), test.m)
 			if err != nil {
 				if *updateTestData {
 					t.Logf("%s: could not download module: %s (will remove from testdata)", test.m, err)
@@ -133,7 +131,7 @@ func TestZipSums(t *testing.T) {
 				return
 			}
 
-			sum := modfetch.Sum(ctx, test.m)
+			sum := modfetch.Sum(test.m)
 			if sum != test.wantSum {
 				if *updateTestData {
 					t.Logf("%s: updating content sum to %s", test.m, sum)

@@ -416,7 +416,7 @@ func (t *transferWriter) doBodyCopy(dst io.Writer, src io.Reader) (n int64, err 
 	return
 }
 
-// unwrapBody unwraps the body's inner reader if it's a
+// unwrapBodyReader unwraps the body's inner reader if it's a
 // nopCloser. This is to ensure that body writes sourced from local
 // files (*os.File types) are properly optimized.
 //
@@ -517,7 +517,7 @@ func readTransfer(msg any, r *bufio.Reader) (err error) {
 		t.ProtoMajor, t.ProtoMinor = 1, 1
 	}
 
-	// Transfer-Encoding: chunked, and overriding Content-Length.
+	// Transfer-Encoding: chunked, and overriding Content-Length.   Transfer-Encoding相关
 	if err := t.parseTransferEncoding(); err != nil {
 		return err
 	}
@@ -553,11 +553,13 @@ func readTransfer(msg any, r *bufio.Reader) (err error) {
 		}
 	}
 
+	// todo 这里这坨body不知道干啥的
+	// switch没有条件时，会从多个值为true的case种随机选一个
 	// Prepare body reader. ContentLength < 0 means chunked encoding
 	// or close connection when finished, since multipart is not supported yet
 	switch {
 	case t.Chunked:
-		if isResponse && (noResponseBodyExpected(t.RequestMethod) || !bodyAllowedForStatus(t.StatusCode)) {
+		if noResponseBodyExpected(t.RequestMethod) || !bodyAllowedForStatus(t.StatusCode) {
 			t.Body = NoBody
 		} else {
 			t.Body = &body{src: internal.NewChunkedReader(r), hdr: msg, r: r, closing: t.Close}
@@ -600,7 +602,7 @@ func readTransfer(msg any, r *bufio.Reader) (err error) {
 	return nil
 }
 
-// Checks whether chunked is part of the encodings stack.
+// Checks whether chunked is part of the encodings stack
 func chunked(te []string) bool { return len(te) > 0 && te[0] == "chunked" }
 
 // Checks whether the encoding is explicitly "identity".
@@ -628,7 +630,10 @@ func (t *transferReader) parseTransferEncoding() error {
 	if !present {
 		return nil
 	}
-	delete(t.Header, "Transfer-Encoding")
+	// Content-Encoding是对消息主体进行的编码处理，是在消息生成后直接对消息主体进行压缩、加密等编码操作，然后将编码后的消息主体发送给客户端。
+	//而Transfer-Encoding则是用于传输过程中对消息进行的编码处理，它可以在传输过程中对消息进行分块传输或者压缩等操作，以减少网络带宽的消耗。
+	//一般来说，当消息比较大时，使用Transfer-Encoding进行分块传输可以提高传输效率。
+	delete(t.Header, "Transfer-Encoding") // 用完就删，节省内存，蛮好的
 
 	// Issue 12785; ignore Transfer-Encoding on HTTP/1.0 requests.
 	if !t.protoAtLeast(1, 1) {
@@ -639,12 +644,34 @@ func (t *transferReader) parseTransferEncoding() error {
 	// only if set to "chunked". This is one of the most security sensitive
 	// surfaces in HTTP/1.1 due to the risk of request smuggling, so we keep it
 	// strict and simple.
+	// NOTE Transfer-Encoding只支持chunked
 	if len(raw) != 1 {
 		return &unsupportedTEError{fmt.Sprintf("too many transfer encodings: %q", raw)}
 	}
 	if !ascii.EqualFold(raw[0], "chunked") {
 		return &unsupportedTEError{fmt.Sprintf("unsupported transfer encoding: %q", raw[0])}
 	}
+
+	// 在HTTP协议中，内容长度头字段(Content-Length)用于指示服务器发送的实体主体数据的长度，
+	// 而传输编码头字段(Transfer-Encoding)用于指示对消息主体使用的编码方式。
+	// Content-Length和Transfer-Encoding是HTTP协议中用于确定HTTP消息主体长度的两种方式。
+	//如果同时存在，可能会导致不一致性的问题。
+	//当Content-Length存在时，它表示了HTTP消息主体的长度，而服务器会根据这个值来判断HTTP消息是否完整。
+	//但是当使用Transfer-Encoding时，HTTP消息主体的长度是通过分块传输编码（chunked transfer encoding）进行传输的，因此它并没有一个固定的长度。
+	//这就意味着，当Content-Length和Transfer-Encoding同时存在时，可能会产生歧义，服务器无法准确判断HTTP消息主体的长度。
+	//这种情况下，攻击者可能会利用这种歧义性来发送恶意请求，从而导致安全问题。
+	//例如，攻击者可以通过在HTTP消息主体中插入恶意代码或数据来绕过服务器的检查，从而实现攻击目的。
+	//因此，为了避免这种问题，应该尽量避免同时使用Content-Length和Transfer-Encoding。
+	//如果必须要使用，在发送HTTP消息之前应该确保它们的取值是一致的，并且服务器也应该对HTTP消息进行严格的验证，以确保其完整性和安全性。
+
+	// 在分块编码中，消息的主体被分解成一个或多个大小不等的块，每个块都有自己的大小。
+	// 相反，您应该使用"Transfer-Encoding: chunked"头来告知服务器您正在使用分块编码，并且在每个块的末尾都需要添加一个新行和一个十六进制数来指示下一个块的大小。
+
+	//因此，RFC 7230规定当存在传输编码头字段时，Content-Length头字段应被禁用。
+	//而当接收到同时含有Content-Length和Transfer-Encoding头字段的消息时，应该优先采用Transfer-Encoding，
+	//并移除Content-Length头字段，以防止恶意攻击。这些规定的主要目的是为了确保HTTP消息的正确性、准确性和安全性。
+	// HTTP协议规定Content-Length头字段必须表示未经压缩的实体主体数据的长度，这样接收方才能根据Content-Length头字段的值正确地接收和处理消息。
+	//如果使用了压缩算法，需要在消息头部使用相应的压缩编码方式来指示接收方如何解压缩消息
 
 	// RFC 7230 3.3.2 says "A sender MUST NOT send a Content-Length header field
 	// in any message that contains a Transfer-Encoding header field."
@@ -657,6 +684,14 @@ func (t *transferReader) parseTransferEncoding() error {
 	// Content-Length field prior to forwarding such a message downstream."
 	//
 	// Reportedly, these appear in the wild.
+
+	// 如果不提供Content-Length头字段，接收方将无法准确地知道需要接收多少数据才能完成消息的解析和处理。
+	//在HTTP/1.0中，缺少Content-Length头字段意味着该消息主体长度为0，
+	//这种情况下，服务器可以通过关闭TCP连接来标识消息主体的结束。
+	//但是在HTTP/1.1中，由于持久连接的使用，当没有Content-Length头字段时，服务器无法确定消息主体的真正大小，
+	//也无法在TCP连接未完全关闭的情况下通知客户端消息主体的结束。因此，如果不提供Content-Length头字段，则必须使用分块编码（chunked）来指示消息主体的长度。
+	//总之，如果没有Content-Length头字段或者使用了错误的长度值，都会导致消息的解析和处理出现问题，
+	//从而影响应用程序的正确性和可靠性。因此，在HTTP协议中，Content-Length头字段被视为一项重要的规范，必须正确地指定实体主体数据的长度。
 	delete(t.Header, "Content-Length")
 
 	t.Chunked = true
@@ -670,6 +705,7 @@ func fixLength(isResponse bool, status int, requestMethod string, header Header,
 	isRequest := !isResponse
 	contentLens := header["Content-Length"]
 
+	// Content-Length只取一个
 	// Hardening against HTTP request smuggling
 	if len(contentLens) > 1 {
 		// Per RFC 7230 Section 3.3.2, prevent multiple
@@ -691,7 +727,20 @@ func fixLength(isResponse bool, status int, requestMethod string, header Header,
 	}
 
 	// Logic based on response type or status
-	if isResponse && noResponseBodyExpected(requestMethod) {
+	if noResponseBodyExpected(requestMethod) {
+		// For HTTP requests, as part of hardening against request
+		// smuggling (RFC 7230), don't allow a Content-Length header for
+		// methods which don't permit bodies. As an exception, allow
+		// exactly one Content-Length header if its value is "0".
+
+		// request smuggling(请求走私攻击):当 Web 服务器接收到 HTTP 请求时，会根据请求头中的 Content-Length 字段读取请求主体的长度。
+		//攻击者可以通过构造恶意请求，在同一个请求中伪造多个 Content-Length 字段，
+		//或者混淆 Transfer-Encoding 和 Content-Length 字段，从而使代理服务器对请求的解析存在歧义。
+		//这种攻击方式可以导致代理服务器和目标服务器在处理请求时产生不一致，甚至可能引发安全漏洞，如访问控制错误、信息泄露等问题。
+
+		if isRequest && len(contentLens) > 0 && !(len(contentLens) == 1 && contentLens[0] == "0") {
+			return 0, fmt.Errorf("http: method cannot contain a Content-Length; got %q", contentLens)
+		}
 		return 0, nil
 	}
 	if status/100 == 1 {
@@ -738,7 +787,7 @@ func fixLength(isResponse bool, status int, requestMethod string, header Header,
 
 // Determine whether to hang up after sending a request and body, or
 // receiving a response and body
-// 'header' is the request headers.
+// 'header' is the request headers
 func shouldClose(major, minor int, header Header, removeCloseHeader bool) bool {
 	if major < 1 {
 		return true
@@ -757,8 +806,45 @@ func shouldClose(major, minor int, header Header, removeCloseHeader bool) bool {
 	return hasClose
 }
 
-// Parse the trailer header.
+// Parse the trailer header
 func fixTrailer(header Header, chunked bool) (Header, error) {
+	// Trailer头部是HTTP消息头部之一，它允许在HTTP消息体（通常是响应正文）后添加HTTP标头字段。
+	//Trailer头部告知客户端，在消息主体中出现的标头列表。
+	//当消息主体长度未知时，例如使用分块传输编码时，可以将标头字段的名称作为 trailer 头部的值列出。
+	//这使得服务器可以在发送完整个响应后再发送标头字段，因为在发送响应体时，标头字段可能还未计算或确定。
+	//Trailer头部只能出现在分块传输编码（chunked transfer encoding）的最后一个块或者已知内容长度的消息中，并且只有在发送端和接收端都支持 Trailer后才能使用。
+
+	// 好的，我们来看一个例子：
+	//
+	//假设客户端向服务器发送一条请求，要求服务器返回一个使用分块传输编码的响应。
+	//服务器在响应中返回两个数据块，并在第二个数据块之后添加Trailer头部指示将会附加另外两个标头字段（"Expires"和"ETag"）：
+	//
+	//HTTP/1.1 200 OK
+	//Content-Type: text/plain
+	//Transfer-Encoding: chunked
+	//Trailer: Expires, ETag
+	//
+	//7\r\n
+	//Mozilla\r\n
+	//9\r\n
+	//Developer\r\n
+	//0\r\n
+	//Expires: Fri, 29 May 2023 14:43:21 GMT\r\n
+	//ETag: "abcde12345"\r\n
+	//在这个例子中，第一个数据块为Mozilla，长度为7，第二个数据块为Developer，长度为9，没有其他HTTP标头字段被发送。在响应体结束后，服务器发送了两个标头字段：Expires和ETag。这些标头字段可以在响应传输过程中由接收方进行计算或确定值，然后在整个响应传输结束后一起发送。
+	//
+	//注意，如果服务器无法保证在消息主体的结尾处发送 trailer 头部，则不应该使用 Trailer 标头。因此，在大多数情况下，当消息体长度已知时最好使用正常的HTTP标头而不是 Trailer。
+
+	// Trailer头部通常在网络传输中使用，它包含了一些额外的信息，例如校验和、时间戳、会话标识符等。
+	//这些信息可以帮助接收方确认数据是否完整无误地到达，并且可以在多个数据包组成的会话中对数据进行正确的排序和重组。
+
+	// HTTP 传输编码可以让服务器在没有知道整个实体长度的情况下仍然能够将实体分割成多个部分进行传输。
+	//它允许客户端和服务器以分块方式传输消息主体，并且不需要指定消息主体长度。在这种情况下，每个分块都以长度标识符开头，后跟数据本身，数据之间没有固定的边界或分隔符。最后一个分块的长度标识符为0，表示传输结束。
+	//因此，在我的 HTTP 请求示例中，数字7表示这个分块的长度为7个字节，接下来的7个字节即为包含"Mozilla"的数据块。
+	//这种传输编码机制有助于减少网络拥塞和提高传输效率，特别是在传输大型实体时。
+
+	// 分块传输机制允许服务器在传输实体时对其进行分割，这样可以在数据仍在传输的同时开始处理它们，从而提高效率。但是由于每个数据块都需要加上数字和分隔符，因此相较于非分块传输，它会占用更多的数据量。
+
 	vv, ok := header["Trailer"]
 	if !ok {
 		return nil, nil
@@ -1081,7 +1167,7 @@ var nopCloserWriterToType = reflect.TypeOf(io.NopCloser(struct {
 }{}))
 
 // unwrapNopCloser return the underlying reader and true if r is a NopCloser
-// else it return false.
+// else it return false
 func unwrapNopCloser(r io.Reader) (underlyingReader io.Reader, isNopCloser bool) {
 	switch reflect.TypeOf(r) {
 	case nopCloserType, nopCloserWriterToType:

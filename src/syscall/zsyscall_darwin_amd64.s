@@ -13,6 +13,20 @@ TEXT ·libc_setgroups_trampoline(SB),NOSPLIT,$0-0
 	JMP	libc_setgroups(SB)
 TEXT ·libc_wait4_trampoline(SB),NOSPLIT,$0-0
 	JMP	libc_wait4(SB)
+// 这段汇编是Go语言的汇编代码，它定义了一个名为"libc_accept_trampoline"的函数入口点（entry point），并将其绑定到名为"SB"的符号表中。
+// 该函数不会使用栈空间（NOSPLIT）并且没有任何输入参数和返回值（$0-0）。最后，函数执行一个简单的跳转指令（JMP），以将控制权传递给名为"libc_accept"的函数，该函数也被绑定到"SB"符号表中。
+
+// 在Go语言的汇编中，TEXT指令是用来定义一个函数入口点（entry point）的。通过使用这种指令，可以将Go语言代码与汇编代码联系起来。
+// 在这个例子中，"libc_accept_trampoline"被定义为一个入口点函数，因此可以在Go语言代码中直接调用它。
+// 当Go程序需要执行某些底层操作时，可以使用这个入口点函数来调用外部库中的C函数。由于该函数的名称和地址已经绑定到Go程序的符号表中，因此可以简单地通过函数名来引用它，就像调用任何其他Go函数一样。
+
+// 预定义的标记实际上就是在汇编代码中被声明或定义的符号、指令和数据类型等。在编写汇编代码时，你可以使用这些标记来告诉编译器它们的含义和用途，以便于编译器能够正确地处理汇编代码。
+
+//例如，在Go语言的汇编中，TEXT指令就是一个预定义的标记，它用于定义函数入口点。当编译器遇到TEXT指令时，它会知道这个标记表示函数开头，并且会生成相应的机器码来执行这个函数。
+
+//类似地，Go语言还提供了其他一些预定义的标记，例如FUNCDATA、PCDATA、DATA等，用于定义常量、变量、结构体等数据类型。当编译器遇到这些标记时，它会根据预定义的规则进行处理，并生成相应的机器码。
+
+//总之，预定义的标记在汇编代码中扮演着非常重要的角色，它们为编译器提供了必要的上下文信息，使得它们能够正确地理解和处理汇编代码。
 TEXT ·libc_accept_trampoline(SB),NOSPLIT,$0-0
 	JMP	libc_accept(SB)
 TEXT ·libc_bind_trampoline(SB),NOSPLIT,$0-0
@@ -143,8 +157,6 @@ TEXT ·libc_mlockall_trampoline(SB),NOSPLIT,$0-0
 	JMP	libc_mlockall(SB)
 TEXT ·libc_mprotect_trampoline(SB),NOSPLIT,$0-0
 	JMP	libc_mprotect(SB)
-TEXT ·libc_msync_trampoline(SB),NOSPLIT,$0-0
-	JMP	libc_msync(SB)
 TEXT ·libc_munlock_trampoline(SB),NOSPLIT,$0-0
 	JMP	libc_munlock(SB)
 TEXT ·libc_munlockall_trampoline(SB),NOSPLIT,$0-0

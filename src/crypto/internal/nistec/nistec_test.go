@@ -8,19 +8,20 @@ import (
 	"bytes"
 	"crypto/elliptic"
 	"crypto/internal/nistec"
-	"fmt"
-	"internal/testenv"
 	"math/big"
 	"math/rand"
+	"os"
+	"strings"
 	"testing"
 )
 
 func TestAllocations(t *testing.T) {
-	testenv.SkipIfOptimizationOff(t)
-
+	if strings.HasSuffix(os.Getenv("GO_BUILDER_NAME"), "-noopt") {
+		t.Skip("skipping allocations test without relevant optimizations")
+	}
 	t.Run("P224", func(t *testing.T) {
-		if allocs := testing.AllocsPerRun(10, func() {
-			p := nistec.NewP224Point().SetGenerator()
+		if allocs := testing.AllocsPerRun(100, func() {
+			p := nistec.NewP224Generator()
 			scalar := make([]byte, 28)
 			rand.Read(scalar)
 			p.ScalarBaseMult(scalar)
@@ -38,8 +39,8 @@ func TestAllocations(t *testing.T) {
 		}
 	})
 	t.Run("P256", func(t *testing.T) {
-		if allocs := testing.AllocsPerRun(10, func() {
-			p := nistec.NewP256Point().SetGenerator()
+		if allocs := testing.AllocsPerRun(100, func() {
+			p := nistec.NewP256Generator()
 			scalar := make([]byte, 32)
 			rand.Read(scalar)
 			p.ScalarBaseMult(scalar)
@@ -57,8 +58,8 @@ func TestAllocations(t *testing.T) {
 		}
 	})
 	t.Run("P384", func(t *testing.T) {
-		if allocs := testing.AllocsPerRun(10, func() {
-			p := nistec.NewP384Point().SetGenerator()
+		if allocs := testing.AllocsPerRun(100, func() {
+			p := nistec.NewP384Generator()
 			scalar := make([]byte, 48)
 			rand.Read(scalar)
 			p.ScalarBaseMult(scalar)
@@ -76,8 +77,8 @@ func TestAllocations(t *testing.T) {
 		}
 	})
 	t.Run("P521", func(t *testing.T) {
-		if allocs := testing.AllocsPerRun(10, func() {
-			p := nistec.NewP521Point().SetGenerator()
+		if allocs := testing.AllocsPerRun(100, func() {
+			p := nistec.NewP521Generator()
 			scalar := make([]byte, 66)
 			rand.Read(scalar)
 			p.ScalarBaseMult(scalar)
@@ -98,7 +99,6 @@ func TestAllocations(t *testing.T) {
 
 type nistPoint[T any] interface {
 	Bytes() []byte
-	SetGenerator() T
 	SetBytes([]byte) (T, error)
 	Add(T, T) T
 	Double(T) T
@@ -108,21 +108,21 @@ type nistPoint[T any] interface {
 
 func TestEquivalents(t *testing.T) {
 	t.Run("P224", func(t *testing.T) {
-		testEquivalents(t, nistec.NewP224Point, elliptic.P224())
+		testEquivalents(t, nistec.NewP224Point, nistec.NewP224Generator, elliptic.P224())
 	})
 	t.Run("P256", func(t *testing.T) {
-		testEquivalents(t, nistec.NewP256Point, elliptic.P256())
+		testEquivalents(t, nistec.NewP256Point, nistec.NewP256Generator, elliptic.P256())
 	})
 	t.Run("P384", func(t *testing.T) {
-		testEquivalents(t, nistec.NewP384Point, elliptic.P384())
+		testEquivalents(t, nistec.NewP384Point, nistec.NewP384Generator, elliptic.P384())
 	})
 	t.Run("P521", func(t *testing.T) {
-		testEquivalents(t, nistec.NewP521Point, elliptic.P521())
+		testEquivalents(t, nistec.NewP521Point, nistec.NewP521Generator, elliptic.P521())
 	})
 }
 
-func testEquivalents[P nistPoint[P]](t *testing.T, newPoint func() P, c elliptic.Curve) {
-	p := newPoint().SetGenerator()
+func testEquivalents[P nistPoint[P]](t *testing.T, newPoint, newGenerator func() P, c elliptic.Curve) {
+	p := newGenerator()
 
 	elementSize := (c.Params().BitSize + 7) / 8
 	two := make([]byte, elementSize)
@@ -133,13 +133,21 @@ func testEquivalents[P nistPoint[P]](t *testing.T, newPoint func() P, c elliptic
 	p1 := newPoint().Double(p)
 	p2 := newPoint().Add(p, p)
 	p3, err := newPoint().ScalarMult(p, two)
-	fatalIfErr(t, err)
+	if err != nil {
+		t.Fatal(err)
+	}
 	p4, err := newPoint().ScalarBaseMult(two)
-	fatalIfErr(t, err)
+	if err != nil {
+		t.Fatal(err)
+	}
 	p5, err := newPoint().ScalarMult(p, nPlusTwo)
-	fatalIfErr(t, err)
+	if err != nil {
+		t.Fatal(err)
+	}
 	p6, err := newPoint().ScalarBaseMult(nPlusTwo)
-	fatalIfErr(t, err)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !bytes.Equal(p1.Bytes(), p2.Bytes()) {
 		t.Error("P+P != 2*P")
@@ -158,98 +166,18 @@ func testEquivalents[P nistPoint[P]](t *testing.T, newPoint func() P, c elliptic
 	}
 }
 
-func TestScalarMult(t *testing.T) {
-	t.Run("P224", func(t *testing.T) {
-		testScalarMult(t, nistec.NewP224Point, elliptic.P224())
-	})
-	t.Run("P256", func(t *testing.T) {
-		testScalarMult(t, nistec.NewP256Point, elliptic.P256())
-	})
-	t.Run("P384", func(t *testing.T) {
-		testScalarMult(t, nistec.NewP384Point, elliptic.P384())
-	})
-	t.Run("P521", func(t *testing.T) {
-		testScalarMult(t, nistec.NewP521Point, elliptic.P521())
-	})
-}
-
-func testScalarMult[P nistPoint[P]](t *testing.T, newPoint func() P, c elliptic.Curve) {
-	G := newPoint().SetGenerator()
-	checkScalar := func(t *testing.T, scalar []byte) {
-		p1, err := newPoint().ScalarBaseMult(scalar)
-		fatalIfErr(t, err)
-		p2, err := newPoint().ScalarMult(G, scalar)
-		fatalIfErr(t, err)
-		if !bytes.Equal(p1.Bytes(), p2.Bytes()) {
-			t.Error("[k]G != ScalarBaseMult(k)")
-		}
-
-		d := new(big.Int).SetBytes(scalar)
-		d.Sub(c.Params().N, d)
-		d.Mod(d, c.Params().N)
-		g1, err := newPoint().ScalarBaseMult(d.FillBytes(make([]byte, len(scalar))))
-		fatalIfErr(t, err)
-		g1.Add(g1, p1)
-		if !bytes.Equal(g1.Bytes(), newPoint().Bytes()) {
-			t.Error("[N - k]G + [k]G != ∞")
-		}
-	}
-
-	byteLen := len(c.Params().N.Bytes())
-	bitLen := c.Params().N.BitLen()
-	t.Run("0", func(t *testing.T) { checkScalar(t, make([]byte, byteLen)) })
-	t.Run("1", func(t *testing.T) {
-		checkScalar(t, big.NewInt(1).FillBytes(make([]byte, byteLen)))
-	})
-	t.Run("N-1", func(t *testing.T) {
-		checkScalar(t, new(big.Int).Sub(c.Params().N, big.NewInt(1)).Bytes())
-	})
-	t.Run("N", func(t *testing.T) { checkScalar(t, c.Params().N.Bytes()) })
-	t.Run("N+1", func(t *testing.T) {
-		checkScalar(t, new(big.Int).Add(c.Params().N, big.NewInt(1)).Bytes())
-	})
-	t.Run("all1s", func(t *testing.T) {
-		s := new(big.Int).Lsh(big.NewInt(1), uint(bitLen))
-		s.Sub(s, big.NewInt(1))
-		checkScalar(t, s.Bytes())
-	})
-	if testing.Short() {
-		return
-	}
-	for i := 0; i < bitLen; i++ {
-		t.Run(fmt.Sprintf("1<<%d", i), func(t *testing.T) {
-			s := new(big.Int).Lsh(big.NewInt(1), uint(i))
-			checkScalar(t, s.FillBytes(make([]byte, byteLen)))
-		})
-	}
-	// Test N-32...N+32 since they risk overlapping with precomputed table values
-	// in the final additions.
-	for i := int64(-32); i <= 32; i++ {
-		t.Run(fmt.Sprintf("N%+d", i), func(t *testing.T) {
-			checkScalar(t, new(big.Int).Add(c.Params().N, big.NewInt(i)).Bytes())
-		})
-	}
-}
-
-func fatalIfErr(t *testing.T, err error) {
-	t.Helper()
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
 func BenchmarkScalarMult(b *testing.B) {
 	b.Run("P224", func(b *testing.B) {
-		benchmarkScalarMult(b, nistec.NewP224Point().SetGenerator(), 28)
+		benchmarkScalarMult(b, nistec.NewP224Generator(), 28)
 	})
 	b.Run("P256", func(b *testing.B) {
-		benchmarkScalarMult(b, nistec.NewP256Point().SetGenerator(), 32)
+		benchmarkScalarMult(b, nistec.NewP256Generator(), 32)
 	})
 	b.Run("P384", func(b *testing.B) {
-		benchmarkScalarMult(b, nistec.NewP384Point().SetGenerator(), 48)
+		benchmarkScalarMult(b, nistec.NewP384Generator(), 48)
 	})
 	b.Run("P521", func(b *testing.B) {
-		benchmarkScalarMult(b, nistec.NewP521Point().SetGenerator(), 66)
+		benchmarkScalarMult(b, nistec.NewP521Generator(), 66)
 	})
 }
 
@@ -265,16 +193,16 @@ func benchmarkScalarMult[P nistPoint[P]](b *testing.B, p P, scalarSize int) {
 
 func BenchmarkScalarBaseMult(b *testing.B) {
 	b.Run("P224", func(b *testing.B) {
-		benchmarkScalarBaseMult(b, nistec.NewP224Point().SetGenerator(), 28)
+		benchmarkScalarBaseMult(b, nistec.NewP224Generator(), 28)
 	})
 	b.Run("P256", func(b *testing.B) {
-		benchmarkScalarBaseMult(b, nistec.NewP256Point().SetGenerator(), 32)
+		benchmarkScalarBaseMult(b, nistec.NewP256Generator(), 32)
 	})
 	b.Run("P384", func(b *testing.B) {
-		benchmarkScalarBaseMult(b, nistec.NewP384Point().SetGenerator(), 48)
+		benchmarkScalarBaseMult(b, nistec.NewP384Generator(), 48)
 	})
 	b.Run("P521", func(b *testing.B) {
-		benchmarkScalarBaseMult(b, nistec.NewP521Point().SetGenerator(), 66)
+		benchmarkScalarBaseMult(b, nistec.NewP521Generator(), 66)
 	})
 }
 

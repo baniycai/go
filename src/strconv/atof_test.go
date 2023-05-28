@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type atofTest struct {
@@ -462,6 +463,7 @@ func initAtofOnce() {
 	}
 
 	// Generate random inputs for tests and benchmarks
+	rand.Seed(time.Now().UnixNano())
 	if testing.Short() {
 		atofRandomTests = make([]atofSimpleTest, 100)
 	} else {

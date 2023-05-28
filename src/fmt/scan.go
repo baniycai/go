@@ -462,8 +462,8 @@ func (s *ss) token(skipSpace bool, f func(rune) bool) []byte {
 	return s.buf
 }
 
-var errComplex = errors.New("syntax error scanning complex number")
-var errBool = errors.New("syntax error scanning boolean")
+var complexError = errors.New("syntax error scanning complex number")
+var boolError = errors.New("syntax error scanning boolean")
 
 func indexRune(s string, r rune) int {
 	for i, c := range s {
@@ -542,12 +542,12 @@ func (s *ss) scanBool(verb rune) bool {
 		return true
 	case 't', 'T':
 		if s.accept("rR") && (!s.accept("uU") || !s.accept("eE")) {
-			s.error(errBool)
+			s.error(boolError)
 		}
 		return true
 	case 'f', 'F':
 		if s.accept("aA") && (!s.accept("lL") || !s.accept("sS") || !s.accept("eE")) {
-			s.error(errBool)
+			s.error(boolError)
 		}
 		return false
 	}
@@ -747,16 +747,16 @@ func (s *ss) complexTokens() (real, imag string) {
 	s.buf = s.buf[:0]
 	// Must now have a sign.
 	if !s.accept("+-") {
-		s.error(errComplex)
+		s.error(complexError)
 	}
 	// Sign is now in buffer
 	imagSign := string(s.buf)
 	imag = s.floatToken()
 	if !s.accept("i") {
-		s.error(errComplex)
+		s.error(complexError)
 	}
 	if parens && !s.accept(")") {
-		s.error(errComplex)
+		s.error(complexError)
 	}
 	return real, imagSign + imag
 }
@@ -803,7 +803,7 @@ func (s *ss) convertFloat(str string, n int) float64 {
 	return f
 }
 
-// scanComplex converts the next token to a complex128 value.
+// convertComplex converts the next token to a complex128 value.
 // The atof argument is a type-specific reader for the underlying type.
 // If we're reading complex64, atof will parse float32s and convert them
 // to float64's to avoid reproducing this code for each complex type.

@@ -3,7 +3,6 @@
 // license that can be found in the LICENSE file.
 
 #define NOSPLIT 7
-#define NOFRAME 512
 
 TEXT ·asmMain(SB),0,$0-0
 	CALL ·startSelf(SB)
@@ -33,9 +32,9 @@ TEXT ·chainEnd(SB),NOSPLIT,$1000-0 // Should be reported twice
 	RET
 
 // Test reporting of rootless recursion
-TEXT ·startRec(SB),NOSPLIT|NOFRAME,$0-0
+TEXT ·startRec(SB),NOSPLIT,$0-0
 	CALL ·startRec0(SB)
 	RET
-TEXT ·startRec0(SB),NOSPLIT|NOFRAME,$0-0
+TEXT ·startRec0(SB),NOSPLIT,$0-0
 	CALL ·startRec(SB)
 	RET

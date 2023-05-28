@@ -1,4 +1,4 @@
-[short] skip
+[!net] skip
 [!exec:fossil] skip
 
 # Regression test for 'go get' to ensure repositories

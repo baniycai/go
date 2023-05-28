@@ -3,6 +3,7 @@
 // license that can be found in the LICENSE file.
 
 //go:build ignore
+// +build ignore
 
 // Compute Fibonacci numbers with two goroutines
 // that pass integers back and forth.  No actual

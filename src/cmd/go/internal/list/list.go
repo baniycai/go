@@ -14,14 +14,10 @@ import (
 	"io"
 	"os"
 	"reflect"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"text/template"
-
-	"golang.org/x/sync/semaphore"
 
 	"cmd/go/internal/base"
 	"cmd/go/internal/cache"
@@ -56,45 +52,44 @@ syntax of package template. The default output is equivalent
 to -f '{{.ImportPath}}'. The struct being passed to the template is:
 
     type Package struct {
-        Dir            string   // directory containing package sources
-        ImportPath     string   // import path of package in dir
-        ImportComment  string   // path in import comment on package statement
-        Name           string   // package name
-        Doc            string   // package documentation string
-        Target         string   // install path
-        Shlib          string   // the shared library that contains this package (only set when -linkshared)
-        Goroot         bool     // is this package in the Go root?
-        Standard       bool     // is this package part of the standard Go library?
-        Stale          bool     // would 'go install' do anything for this package?
-        StaleReason    string   // explanation for Stale==true
-        Root           string   // Go root or Go path dir containing this package
-        ConflictDir    string   // this directory shadows Dir in $GOPATH
-        BinaryOnly     bool     // binary-only package (no longer supported)
-        ForTest        string   // package is only for use in named test
-        Export         string   // file containing export data (when using -export)
-        BuildID        string   // build ID of the compiled package (when using -export)
-        Module         *Module  // info about package's containing module, if any (can be nil)
-        Match          []string // command-line patterns matching this package
-        DepOnly        bool     // package is only a dependency, not explicitly listed
-        DefaultGODEBUG string  // default GODEBUG setting, for main packages
+        Dir           string   // directory containing package sources
+        ImportPath    string   // import path of package in dir
+        ImportComment string   // path in import comment on package statement
+        Name          string   // package name
+        Doc           string   // package documentation string
+        Target        string   // install path
+        Shlib         string   // the shared library that contains this package (only set when -linkshared)
+        Goroot        bool     // is this package in the Go root?
+        Standard      bool     // is this package part of the standard Go library?
+        Stale         bool     // would 'go install' do anything for this package?
+        StaleReason   string   // explanation for Stale==true
+        Root          string   // Go root or Go path dir containing this package
+        ConflictDir   string   // this directory shadows Dir in $GOPATH
+        BinaryOnly    bool     // binary-only package (no longer supported)
+        ForTest       string   // package is only for use in named test
+        Export        string   // file containing export data (when using -export)
+        BuildID       string   // build ID of the compiled package (when using -export)
+        Module        *Module  // info about package's containing module, if any (can be nil)
+        Match         []string // command-line patterns matching this package
+        DepOnly       bool     // package is only a dependency, not explicitly listed
 
         // Source files
-        GoFiles           []string   // .go source files (excluding CgoFiles, TestGoFiles, XTestGoFiles)
-        CgoFiles          []string   // .go source files that import "C"
-        CompiledGoFiles   []string   // .go files presented to compiler (when using -compiled)
-        IgnoredGoFiles    []string   // .go source files ignored due to build constraints
+        GoFiles         []string   // .go source files (excluding CgoFiles, TestGoFiles, XTestGoFiles)
+        CgoFiles        []string   // .go source files that import "C"
+        CompiledGoFiles []string   // .go files presented to compiler (when using -compiled)
+        IgnoredGoFiles  []string   // .go source files ignored due to build constraints
         IgnoredOtherFiles []string // non-.go source files ignored due to build constraints
-        CFiles            []string   // .c source files
-        CXXFiles          []string   // .cc, .cxx and .cpp source files
-        MFiles            []string   // .m source files
-        HFiles            []string   // .h, .hh, .hpp and .hxx source files
-        FFiles            []string   // .f, .F, .for and .f90 Fortran source files
-        SFiles            []string   // .s source files
-        SwigFiles         []string   // .swig files
-        SwigCXXFiles      []string   // .swigcxx files
-        SysoFiles         []string   // .syso object files to add to archive
-        TestGoFiles       []string   // _test.go files in package
-        XTestGoFiles      []string   // _test.go files outside package
+        CFiles          []string   // .c source files
+        CXXFiles        []string   // .cc, .cxx and .cpp source files
+        MFiles          []string   // .m source files
+        HFiles          []string   // .h, .hh, .hpp and .hxx source files
+        FFiles          []string   // .f, .F, .for and .f90 Fortran source files
+        SFiles          []string   // .s source files
+        SwigFiles       []string   // .swig files
+        SwigCXXFiles    []string   // .swigcxx files
+        SysoFiles       []string   // .syso object files to add to archive
+        TestGoFiles     []string   // _test.go files in package
+        XTestGoFiles    []string   // _test.go files outside package
 
         // Embedded files
         EmbedPatterns      []string // //go:embed patterns
@@ -152,9 +147,9 @@ The template function "context" returns the build context, defined as:
         GOROOT        string   // Go root
         GOPATH        string   // Go path
         CgoEnabled    bool     // whether cgo can be used
-        UseAllFiles   bool     // use files regardless of //go:build lines, file names
+        UseAllFiles   bool     // use files regardless of +build lines, file names
         Compiler      string   // compiler to assume when computing target paths
-        BuildTags     []string // build constraints to match in //go:build lines
+        BuildTags     []string // build constraints to match in +build lines
         ToolTags      []string // toolchain-specific build constraints
         ReleaseTags   []string // releases the current release is compatible with
         InstallSuffix string   // suffix to use in the name of the install dir
@@ -197,8 +192,6 @@ and the BuildID field to the build ID of the compiled package.
 
 The -find flag causes list to identify the named packages but not
 resolve their dependencies: the Imports and Deps lists will be empty.
-With the -find flag, the -deps, -test and -export commands cannot be
-used.
 
 The -test flag causes list to report not only the named packages
 but also their test binaries (for packages with tests), to convey to
@@ -343,9 +336,6 @@ For more about modules, see https://golang.org/ref/mod.
 func init() {
 	CmdList.Run = runList // break init cycle
 	work.AddBuildFlags(CmdList, work.DefaultBuildFlags)
-	if cfg.Experiment != nil && cfg.Experiment.CoverageRedesign {
-		work.AddCoverFlags(CmdList, nil)
-	}
 	CmdList.Flag.Var(&listJsonFields, "json", "")
 }
 
@@ -419,7 +409,7 @@ var nl = []byte{'\n'}
 func runList(ctx context.Context, cmd *base.Command, args []string) {
 	modload.InitWorkfile()
 
-	if *listFmt != "" && listJson {
+	if *listFmt != "" && listJson == true {
 		base.Fatalf("go list -f cannot be used with -json")
 	}
 	if *listReuse != "" && !*listM {
@@ -452,7 +442,7 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 				// Clear all non-requested fields.
 				for i := 0; i < v.NumField(); i++ {
 					if !listJsonFields.needAny(v.Type().Field(i).Name) {
-						v.Field(i).SetZero()
+						v.Field(i).Set(reflect.Zero(v.Type().Field(i).Type))
 					}
 				}
 			}
@@ -598,16 +588,19 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 	if *listFind && *listTest {
 		base.Fatalf("go list -test cannot be used with -find")
 	}
-	if *listFind && *listExport {
-		base.Fatalf("go list -export cannot be used with -find")
-	}
 
 	pkgOpts := load.PackageOpts{
-		IgnoreImports:      *listFind,
-		ModResolveTests:    *listTest,
-		AutoVCS:            true,
-		SuppressBuildInfo:  !*listExport && !listJsonFields.needAny("Stale", "StaleReason"),
-		SuppressEmbedFiles: !*listExport && !listJsonFields.needAny("EmbedFiles", "TestEmbedFiles", "XTestEmbedFiles"),
+		IgnoreImports:   *listFind,
+		ModResolveTests: *listTest,
+		LoadVCS:         true,
+		// SuppressDeps is set if the user opts to explicitly ask for the json fields they
+		// need, don't ask for Deps or DepsErrors. It's not set when using a template string,
+		// even if *listFmt doesn't contain .Deps because Deps are used to find import cycles
+		// for test variants of packages and users who have been providing format strings
+		// might not expect those errors to stop showing up.
+		// See issue #52443.
+		SuppressDeps:      !listJsonFields.needAny("Deps", "DepsErrors"),
+		SuppressBuildInfo: !listJsonFields.needAny("Stale", "StaleReason"),
 	}
 	pkgs := load.PackagesAndErrors(ctx, pkgOpts, args)
 	if !*listE {
@@ -624,46 +617,38 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 		base.ExitIfErrors()
 	}
 
+	if cache.Default() == nil {
+		// These flags return file names pointing into the build cache,
+		// so the build cache must exist.
+		if *listCompiled {
+			base.Fatalf("go list -compiled requires build cache")
+		}
+		if *listExport {
+			base.Fatalf("go list -export requires build cache")
+		}
+		if *listTest {
+			base.Fatalf("go list -test requires build cache")
+		}
+	}
+
 	if *listTest {
 		c := cache.Default()
 		// Add test binaries to packages to be listed.
-
-		var wg sync.WaitGroup
-		sema := semaphore.NewWeighted(int64(runtime.GOMAXPROCS(0)))
-		type testPackageSet struct {
-			p, pmain, ptest, pxtest *load.Package
-		}
-		var testPackages []testPackageSet
 		for _, p := range pkgs {
 			if len(p.TestGoFiles)+len(p.XTestGoFiles) > 0 {
 				var pmain, ptest, pxtest *load.Package
 				var err error
 				if *listE {
-					sema.Acquire(ctx, 1)
-					wg.Add(1)
-					done := func() {
-						sema.Release(1)
-						wg.Done()
-					}
-					pmain, ptest, pxtest = load.TestPackagesAndErrors(ctx, done, pkgOpts, p, nil)
+					pmain, ptest, pxtest = load.TestPackagesAndErrors(ctx, pkgOpts, p, nil)
 				} else {
 					pmain, ptest, pxtest, err = load.TestPackagesFor(ctx, pkgOpts, p, nil)
 					if err != nil {
-						base.Fatalf("go: can't load test package: %s", err)
+						base.Errorf("can't load test package: %s", err)
 					}
 				}
-				testPackages = append(testPackages, testPackageSet{p, pmain, ptest, pxtest})
-			}
-		}
-		wg.Wait()
-		for _, pkgset := range testPackages {
-			p, pmain, ptest, pxtest := pkgset.p, pkgset.pmain, pkgset.ptest, pkgset.pxtest
-			if pmain != nil {
-				pkgs = append(pkgs, pmain)
-				data := *pmain.Internal.TestmainGo
-				sema.Acquire(ctx, 1)
-				wg.Add(1)
-				go func() {
+				if pmain != nil {
+					pkgs = append(pkgs, pmain)
+					data := *pmain.Internal.TestmainGo
 					h := cache.NewHash("testmain")
 					h.Write([]byte("testmain\n"))
 					h.Write(data)
@@ -672,20 +657,15 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 						base.Fatalf("%s", err)
 					}
 					pmain.GoFiles[0] = c.OutputFile(out)
-					sema.Release(1)
-					wg.Done()
-				}()
-
-			}
-			if ptest != nil && ptest != p {
-				pkgs = append(pkgs, ptest)
-			}
-			if pxtest != nil {
-				pkgs = append(pkgs, pxtest)
+				}
+				if ptest != nil && ptest != p {
+					pkgs = append(pkgs, ptest)
+				}
+				if pxtest != nil {
+					pkgs = append(pkgs, pxtest)
+				}
 			}
 		}
-
-		wg.Wait()
 	}
 
 	// Remember which packages are named on the command line.
@@ -710,15 +690,6 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 	needStale := (listJson && listJsonFields.needAny("Stale", "StaleReason")) || strings.Contains(*listFmt, ".Stale")
 	if needStale || *listExport || *listCompiled {
 		b := work.NewBuilder("")
-		if *listE {
-			b.AllowErrors = true
-		}
-		defer func() {
-			if err := b.Close(); err != nil {
-				base.Fatalf("go: %v", err)
-			}
-		}()
-
 		b.IsCmdList = true
 		b.NeedExport = *listExport
 		b.NeedCompiledGoFiles = *listCompiled
@@ -743,20 +714,19 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 		}
 	}
 
-	if *listTest || (cfg.BuildPGO == "auto" && len(cmdline) > 1) {
+	if *listTest {
 		all := pkgs
 		if !*listDeps {
 			all = loadPackageList(pkgs)
 		}
 		// Update import paths to distinguish the real package p
-		// from p recompiled for q.test, or to distinguish between
-		// p compiled with different PGO profiles.
+		// from p recompiled for q.test.
 		// This must happen only once the build code is done
 		// looking at import paths, because it will get very confused
 		// if it sees these.
 		old := make(map[string]string)
 		for _, p := range all {
-			if p.ForTest != "" || p.Internal.ForMain != "" {
+			if p.ForTest != "" {
 				new := p.Desc()
 				old[new] = p.ImportPath
 				p.ImportPath = new
@@ -767,7 +737,7 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 		m := make(map[string]string)
 		for _, p := range all {
 			for _, p1 := range p.Internal.Imports {
-				if p1.ForTest != "" || p1.Internal.ForMain != "" {
+				if p1.ForTest != "" {
 					m[old[p1.ImportPath]] = p1.ImportPath
 				}
 			}
@@ -780,30 +750,20 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 				delete(m, old)
 			}
 		}
-	}
-
-	if listJsonFields.needAny("Deps", "DepsErrors") {
-		all := pkgs
-		// Make sure we iterate through packages in a postorder traversal,
-		// which load.PackageList guarantees. If *listDeps, then all is
-		// already in PackageList order. Otherwise, calling load.PackageList
-		// provides the guarantee. In the case of an import cycle, the last package
-		// visited in the cycle, importing the first encountered package in the cycle,
-		// is visited first. The cycle import error will be bubbled up in the traversal
-		// order up to the first package in the cycle, covering all the packages
-		// in the cycle.
-		if !*listDeps {
-			all = load.PackageList(pkgs)
-		}
-		if listJsonFields.needAny("Deps") {
-			for _, p := range all {
-				collectDeps(p)
+		// Recompute deps lists using new strings, from the leaves up.
+		for _, p := range all {
+			deps := make(map[string]bool)
+			for _, p1 := range p.Internal.Imports {
+				deps[p1.ImportPath] = true
+				for _, d := range p1.Deps {
+					deps[d] = true
+				}
 			}
-		}
-		if listJsonFields.needAny("DepsErrors") {
-			for _, p := range all {
-				collectDepsErrors(p)
+			p.Deps = make([]string, 0, len(deps))
+			for d := range deps {
+				p.Deps = append(p.Deps, d)
 			}
+			sort.Strings(p.Deps)
 		}
 	}
 
@@ -904,53 +864,6 @@ func loadPackageList(roots []*load.Package) []*load.Package {
 	}
 
 	return pkgs
-}
-
-// collectDeps populates p.Deps by iterating over p.Internal.Imports.
-// collectDeps must be called on all of p's Imports before being called on p.
-func collectDeps(p *load.Package) {
-	deps := make(map[string]bool)
-
-	for _, p := range p.Internal.Imports {
-		deps[p.ImportPath] = true
-		for _, q := range p.Deps {
-			deps[q] = true
-		}
-	}
-
-	p.Deps = make([]string, 0, len(deps))
-	for dep := range deps {
-		p.Deps = append(p.Deps, dep)
-	}
-	sort.Strings(p.Deps)
-}
-
-// collectDeps populates p.DepsErrors by iterating over p.Internal.Imports.
-// collectDepsErrors must be called on all of p's Imports before being called on p.
-func collectDepsErrors(p *load.Package) {
-	depsErrors := make(map[*load.PackageError]bool)
-
-	for _, p := range p.Internal.Imports {
-		if p.Error != nil {
-			depsErrors[p.Error] = true
-		}
-		for _, q := range p.DepsErrors {
-			depsErrors[q] = true
-		}
-	}
-
-	p.DepsErrors = make([]*load.PackageError, 0, len(depsErrors))
-	for deperr := range depsErrors {
-		p.DepsErrors = append(p.DepsErrors, deperr)
-	}
-	// Sort packages by the package on the top of the stack, which should be
-	// the package the error was produced for. Each package can have at most
-	// one error set on it.
-	sort.Slice(p.DepsErrors, func(i, j int) bool {
-		stki, stkj := p.DepsErrors[i].ImportStack, p.DepsErrors[j].ImportStack
-		pathi, pathj := stki[len(stki)-1], stkj[len(stkj)-1]
-		return pathi < pathj
-	})
 }
 
 // TrackingWriter tracks the last byte written on every write so

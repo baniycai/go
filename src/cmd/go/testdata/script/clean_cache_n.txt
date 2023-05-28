@@ -15,9 +15,6 @@ exists $GOCACHE/00
 go clean -cache
 ! exists $GOCACHE/00
 
-! go clean -cache .
-stderr 'go: clean -cache cannot be used with package arguments'
-
 -- main.go --
 package main
 

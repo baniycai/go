@@ -10,7 +10,7 @@ package bufio
 import (
 	"bytes"
 	"errors"
-	"io"
+	"std/io"
 	"strings"
 	"unicode/utf8"
 )
@@ -32,7 +32,7 @@ var (
 type Reader struct {
 	buf          []byte
 	rd           io.Reader // reader provided by the client
-	r, w         int       // buf read and write positions
+	r, w         int       // buf read and write positions		r:读到buffer的哪个位置了;w:从底层io读出来的写到buffer的哪个位置了，w-r表示放在buffer里还没读的
 	err          error
 	lastByte     int // last byte read for UnreadByte; -1 means invalid
 	lastRuneSize int // size of last rune read for UnreadRune; -1 means invalid
@@ -70,14 +70,7 @@ func (b *Reader) Size() int { return len(b.buf) }
 // the buffered reader to read from r.
 // Calling Reset on the zero value of Reader initializes the internal buffer
 // to the default size.
-// Calling b.Reset(b) (that is, resetting a Reader to itself) does nothing.
 func (b *Reader) Reset(r io.Reader) {
-	// If a Reader r is passed to NewReader, NewReader will return r.
-	// Different layers of code may do that, and then later pass r
-	// to Reset. Avoid infinite recursion in that case.
-	if b == r {
-		return
-	}
 	if b.buf == nil {
 		b.buf = make([]byte, defaultBufSize)
 	}
@@ -214,17 +207,17 @@ func (b *Reader) Discard(n int) (discarded int, err error) {
 // then this Read method can do so as well; see the [io.Reader] docs.
 func (b *Reader) Read(p []byte) (n int, err error) {
 	n = len(p)
-	if n == 0 {
+	if n == 0 { // len(p)为0读个球球
 		if b.Buffered() > 0 {
 			return 0, nil
 		}
 		return 0, b.readErr()
 	}
-	if b.r == b.w {
-		if b.err != nil {
+	if b.r == b.w { // buffer已经读完了或者是第一次读
+		if b.err != nil { // 上一次的读有问题就直接返回了
 			return 0, b.readErr()
 		}
-		if len(p) >= len(b.buf) {
+		if len(p) >= len(b.buf) { // NOTE p太大就不用缓存区了，直接读到p中就行
 			// Large read, empty buffer.
 			// Read directly into p to avoid copy.
 			n, b.err = b.rd.Read(p)
@@ -241,7 +234,7 @@ func (b *Reader) Read(p []byte) (n int, err error) {
 		// Do not use b.fill, which will loop.
 		b.r = 0
 		b.w = 0
-		n, b.err = b.rd.Read(b.buf)
+		n, b.err = b.rd.Read(b.buf) // NOTE p不比缓存区大，则先读到缓存区,后面再塞到p中
 		if n < 0 {
 			panic(errNegativeRead)
 		}
@@ -254,7 +247,7 @@ func (b *Reader) Read(p []byte) (n int, err error) {
 	// copy as much as we can
 	// Note: if the slice panics here, it is probably because
 	// the underlying reader returned a bad count. See issue 49795.
-	n = copy(p, b.buf[b.r:b.w])
+	n = copy(p, b.buf[b.r:b.w]) // NOTE 将放在缓存区中还没读完的先塞到p中
 	b.r += n
 	b.lastByte = int(b.buf[b.r-1])
 	b.lastRuneSize = -1
@@ -404,6 +397,18 @@ func (b *Reader) ReadSlice(delim byte) (line []byte, err error) {
 // Calling UnreadByte after ReadLine will always unread the last byte read
 // (possibly a character belonging to the line end) even if that byte is not
 // part of the line returned by ReadLine.
+
+// "\n" 和 "\r" 都是在计算机中用来表示换行的特殊字符。
+//
+//"\n" 是 "line feed" 的缩写，它代表着光标向下移动一行。在Unix和Linux系统中，通常使用 "\n" 来表示换行。
+//
+//"\r" 是 "carriage return" 的缩写，它代表着光标回到当前行的开头位置。
+//在早期的电传打字机和打印机中，当打字或打印到一行的末尾时，需要先把打印头或打字杆移到行首再继续打印，这个过程就叫做回车（carriage return）。
+//在Windows系统中，通常使用 "\r\n" 来表示换行。
+//
+//因此，"\n" 和 "\r" 的主要区别在于它们表示的位置不同："\n" 表示换行，即让光标从当前行的末尾移到下一行的开头；而 "\r" 表示回车，即让光标移到当前行的开头。
+
+// note 读取一行，不包括行尾符(\n等)，如果一行太长，则先返回一部分，并带上isPrefix=true，之后继续调用这个方法
 func (b *Reader) ReadLine() (line []byte, isPrefix bool, err error) {
 	line, err = b.ReadSlice('\n')
 	if err == ErrBufferFull {
@@ -434,7 +439,7 @@ func (b *Reader) ReadLine() (line []byte, isPrefix bool, err error) {
 		if len(line) > 1 && line[len(line)-2] == '\r' {
 			drop = 2
 		}
-		line = line[:len(line)-drop]
+		line = line[:len(line)-drop] // 去掉换行符
 	}
 	return
 }
@@ -461,7 +466,8 @@ func (b *Reader) collectFragments(delim byte) (fullBuffers [][]byte, finalFragme
 		}
 
 		// Make a copy of the buffer.
-		buf := bytes.Clone(frag)
+		buf := make([]byte, len(frag))
+		copy(buf, frag)
 		fullBuffers = append(fullBuffers, buf)
 		totalLen += len(buf)
 	}
@@ -576,10 +582,13 @@ func (b *Reader) writeBuf(w io.Writer) (int64, error) {
 // After all data has been written, the client should call the
 // Flush method to guarantee all data has been forwarded to
 // the underlying io.Writer.
+
+// Writer 为 io.Writer 对象实现缓冲。如果写入 Writer 时发生错误，将不再接受更多数据，所有后续写入和 Flush 都将返回错误。
+// 所有数据写入完成后，客户端应调用 Flush 方法以保证所有数据已转发到底层 io.Writer
 type Writer struct {
-	err error
+	err error // 最近写入wr发生的一次err
 	buf []byte
-	n   int
+	n   int // buf已用大小
 	wr  io.Writer
 }
 
@@ -615,14 +624,7 @@ func (b *Writer) Size() int { return len(b.buf) }
 // resets b to write its output to w.
 // Calling Reset on the zero value of Writer initializes the internal buffer
 // to the default size.
-// Calling w.Reset(w) (that is, resetting a Writer to itself) does nothing.
 func (b *Writer) Reset(w io.Writer) {
-	// If a Writer w is passed to NewWriter, NewWriter will return w.
-	// Different layers of code may do that, and then later pass w
-	// to Reset. Avoid infinite recursion in that case.
-	if b == w {
-		return
-	}
 	if b.buf == nil {
 		b.buf = make([]byte, defaultBufSize)
 	}
@@ -641,11 +643,11 @@ func (b *Writer) Flush() error {
 	}
 	n, err := b.wr.Write(b.buf[0:b.n])
 	if n < b.n && err == nil {
-		err = io.ErrShortWrite
+		err = io.ErrShortWrite // 没写够
 	}
 	if err != nil {
 		if n > 0 && n < b.n {
-			copy(b.buf[0:b.n-n], b.buf[n:b.n])
+			copy(b.buf[0:b.n-n], b.buf[n:b.n]) // 写到一半发生错误，将成功写入的移除，失败的留下
 		}
 		b.n -= n
 		b.err = err
@@ -673,14 +675,15 @@ func (b *Writer) Buffered() int { return b.n }
 // It returns the number of bytes written.
 // If nn < len(p), it also returns an error explaining
 // why the write is short.
+// 基本原则：大于缓存区长度的部分都刷到io去，最后小于缓存区长度的部分放在缓存区中
 func (b *Writer) Write(p []byte) (nn int, err error) {
-	for len(p) > b.Available() && b.err == nil {
+	for len(p) > b.Available() && b.err == nil { // p比剩下可用缓存区大
 		var n int
-		if b.Buffered() == 0 {
+		if b.Buffered() == 0 { // buffer无内容，直接写底层io，少一次复制
 			// Large write, empty buffer.
 			// Write directly from p to avoid copy.
 			n, b.err = b.wr.Write(p)
-		} else {
+		} else { // 有内容则必须把剩下的内容一起刷到底层io，分多次写，每次写完就刷io
 			n = copy(b.buf[b.n:], p)
 			b.n += n
 			b.Flush()

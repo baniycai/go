@@ -1,4 +1,4 @@
-[compiler:gccgo] skip # gccgo has no cover tool
+[gccgo] skip # gccgo has no cover tool
 
 ! go test -n importmain/test
 stderr 'not an importable package' # check that import main was detected

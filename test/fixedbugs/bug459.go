@@ -4,12 +4,12 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Issue 3890: missing detection of init cycle involving
+// Issue 3890: missing detection of init loop involving
 // method calls in function bodies.
 
 package flag
 
-var commandLine = NewFlagSet() // ERROR "initialization cycle|depends upon itself"
+var commandLine = NewFlagSet() // ERROR "loop|depends upon itself"
 
 type FlagSet struct {
 }

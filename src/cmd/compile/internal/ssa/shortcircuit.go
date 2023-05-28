@@ -4,7 +4,7 @@
 
 package ssa
 
-// shortcircuit finds situations where branch directions
+// Shortcircuit finds situations where branch directions
 // are always correlated and rewrites the CFG to take
 // advantage of that fact.
 // This optimization is useful for compiling && and || expressions.

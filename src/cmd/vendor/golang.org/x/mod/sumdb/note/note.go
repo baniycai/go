@@ -175,7 +175,6 @@ package note
 
 import (
 	"bytes"
-	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
@@ -186,6 +185,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/crypto/ed25519"
 )
 
 // A Verifier verifies messages signed with a specific key.

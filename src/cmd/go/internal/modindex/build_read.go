@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
-	"go/build"
 	"go/parser"
 	"go/token"
 	"io"
@@ -472,18 +471,6 @@ func readGoInfo(f io.Reader, info *fileInfo) error {
 				doc = d.Doc
 			}
 			info.imports = append(info.imports, fileImport{path, spec.Pos(), doc})
-		}
-	}
-
-	// Extract directives.
-	for _, group := range info.parsed.Comments {
-		if group.Pos() >= info.parsed.Package {
-			break
-		}
-		for _, c := range group.List {
-			if strings.HasPrefix(c.Text, "//go:") {
-				info.directives = append(info.directives, build.Directive{Text: c.Text, Pos: info.fset.Position(c.Slash)})
-			}
 		}
 	}
 

@@ -351,24 +351,21 @@ func escape(s string, mode encoding) string {
 // Note that the Path field is stored in decoded form: /%47%6f%2f becomes /Go/.
 // A consequence is that it is impossible to tell which slashes in the Path were
 // slashes in the raw URL and which were %2f. This distinction is rarely important,
-// but when it is, the code should use the EscapedPath method, which preserves
-// the original encoding of Path.
+// but when it is, the code should use RawPath, an optional field which only gets
+// set if the default encoding is different from Path.
 //
-// The RawPath field is an optional field which is only set when the default
-// encoding of Path is different from the escaped path. See the EscapedPath method
-// for more details.
-//
-// URL's String method uses the EscapedPath method to obtain the path.
+// URL's String method uses the EscapedPath method to obtain the path. See the
+// EscapedPath method for more details.
 type URL struct {
-	Scheme      string
-	Opaque      string    // encoded opaque data
+	Scheme      string    // http/https等等
+	Opaque      string    // encoded opaque(不透明) data
 	User        *Userinfo // username and password information
 	Host        string    // host or host:port
-	Path        string    // path (relative paths may omit leading slash)
-	RawPath     string    // encoded path hint (see EscapedPath method)
+	Path        string    // path (relative paths may omit leading slash)   解码后的path
+	RawPath     string    // encoded path hint (see EscapedPath method)		原生的path
 	OmitHost    bool      // do not emit empty host (authority)
-	ForceQuery  bool      // append a query ('?') even if RawQuery is empty
-	RawQuery    string    // encoded query values, without '?'
+	ForceQuery  bool      // append a query ('?') even if RawQuery is empty	 尾巴带？但？后面啥也没有
+	RawQuery    string    // encoded query values, without '?'   原始请求参数，即？后面的部分
 	Fragment    string    // fragment for references, without '#'
 	RawFragment string    // encoded fragment hint (see EscapedFragment method)
 }
@@ -484,6 +481,7 @@ func Parse(rawURL string) (*URL, error) {
 // only as an absolute URI or an absolute path.
 // The string url is assumed not to have a #fragment suffix.
 // (Web browsers strip #fragment before sending the URL to a web server.)
+// NOTE 这个方法很简单啦，纯文字处理，将处理后的结果塞到url这个结构中而已，最理想的rawURL=[scheme:][//[userinfo@]host][/]path[?query][#fragment]
 func ParseRequestURI(rawURL string) (*URL, error) {
 	url, err := parse(rawURL, true)
 	if err != nil {
@@ -516,7 +514,7 @@ func parse(rawURL string, viaRequest bool) (*URL, error) {
 
 	// Split off possible leading "http:", "mailto:", etc.
 	// Cannot contain escaped characters.
-	if url.Scheme, rest, err = getScheme(rawURL); err != nil {
+	if url.Scheme, rest, err = getScheme(rawURL); err != nil { // 人肉校验scheme的格式，并返回scheme+path
 		return nil, err
 	}
 	url.Scheme = strings.ToLower(url.Scheme)
@@ -530,6 +528,9 @@ func parse(rawURL string, viaRequest bool) (*URL, error) {
 
 	if !strings.HasPrefix(rest, "/") {
 		if url.Scheme != "" {
+			// 这句话指的是根据RFC 3986规范定义的不带根路径的路径视为不透明。在URI（统一资源标识符）中，路径可以包含一个根目录，也可以没有根目录。
+			//如果路径不包含根目录，则被视为不透明路径，它们对于URI处理程序来说只是一个字符串序列，没有特定的意义或用途。
+			//因此，处理此类URI时需要以不透明方式对待它们的路径部分。
 			// We consider rootless paths per RFC 3986 as opaque.
 			url.Opaque = rest
 			return url, nil
@@ -537,6 +538,19 @@ func parse(rawURL string, viaRequest bool) (*URL, error) {
 		if viaRequest {
 			return nil, errors.New("invalid URI for request")
 		}
+
+		// 在RFC 3986标准的第3.3节中，它指出一个URI引用（Section 4.1）可能是一个相对路径引用，其中第一个路径段不能包含冒号（“：”）字符。
+		//这意味着，如果一个URI引用是相对路径引用，则其路径的第一个部分不能包含冒号字符。
+		//例如，“example.com:8080/path/to/resource”不是一个有效的相对路径引用，因为它的第一个路径部分包含了冒号字符“：”。
+		// 当我们在一个网站上引用不同的资源时，使用不同类型的URI引用可以对应不同的情况：
+		//
+		//假设在"http://example.com"这个网站上，我们需要访问以下三个资源：
+		//
+		//该网站的主页：使用绝对路径引用：http://example.com。
+		//
+		//该网站下的"about"页面：使用相对路径引用：/about.html。
+		//
+		//该网站下的一张图片：使用完整URI引用：https://example.com/images/pic.jpg。
 
 		// Avoid confusion with malformed schemes, like cache_object:foo/bar.
 		// See golang.org/issue/16822.
@@ -560,7 +574,7 @@ func parse(rawURL string, viaRequest bool) (*URL, error) {
 		if err != nil {
 			return nil, err
 		}
-	} else if url.Scheme != "" && strings.HasPrefix(rest, "/") {
+	} else if url.Scheme != "" && strings.HasPrefix(rest, "/") { // 应该大部分都是这样的
 		// OmitHost is set to true when rawURL has an empty host (authority).
 		// See golang.org/issue/46059.
 		url.OmitHost = true
@@ -670,6 +684,26 @@ func parseHost(host string) (string, error) {
 // - setPath("/foo%2fbar") will set Path="/foo/bar" and RawPath="/foo%2fbar"
 // setPath will return an error only if the provided path contains an invalid
 // escaping.
+
+// 在 Web 中，escape() 和 unescape() 函数用于编码和解码字符串中的特殊字符。
+//
+//escape() 函数将字符串转换为新的编码形式，以便将其传输到 URL 或类似的网络资源中。该函数将非 ASCII 字符、空格、标点符号等字符替换为 %xx 形式的十六进制编码，其中 xx 是相关字符的 ASCII 值的十六进制表示。
+//
+//例如，escape("Hello, world!") 将返回 "Hello%2C%20world%21"。
+//
+//unescape() 函数用于将被编码的字符串还原为它们原来的形式。它会将 %xx 形式的十六进制编码转换为相应的字符，并将所有加号 (+) 转换为空格。
+//
+//例如，unescape("Hello%2C%20world%21") 将返回 "Hello, world!"。
+
+// 在 Web 开发中，需要进行编码的主要原因是确保数据的安全性和正确性。有些字符（如空格、标点符号等）在 URL 或其他网络资源中具有特殊含义，因此需要将它们编码以避免出现问题。
+//
+//例如，在 URL 中，空格通常被编码为 %20，而加号 (+) 也可以用来表示空格。如果你想将包含空格的字符串作为 URL 的一部分发送，而没有对其进行编码，那么该字符串可能会被解析器错误地解释为多个部分，从而导致错误的结果。
+//
+//另一个重要的原因是确保数据的安全性。某些字符（如小于号 < 和大于号 >）可能被用于实施跨站点脚本攻击 (Cross-Site Scripting, XSS)，因此需要对这些字符进行编码以避免潜在的安全漏洞。通过编码输入数据，可以防止攻击者注入恶意代码或执行其他类型的攻击。
+//
+//综上所述，编码是确保数据传输和处理正确的重要组成部分，并帮助确保 Web 应用程序的安全。
+
+// NOTE 对p进行解码，Path为解码后的，RawPath为解码前的，如果p是未经过编码的，则RawPath=""
 func (u *URL) setPath(p string) error {
 	path, err := unescape(p, encodePath)
 	if err != nil {
@@ -883,6 +917,9 @@ type Values map[string][]string
 // the empty string. To access multiple values, use the map
 // directly.
 func (v Values) Get(key string) string {
+	if v == nil {
+		return ""
+	}
 	vs := v[key]
 	if len(vs) == 0 {
 		return ""

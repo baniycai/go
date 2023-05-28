@@ -36,7 +36,7 @@ var (
 	Export_is408Message               = is408Message
 )
 
-var MaxWriteWaitBeforeConnReuse = &maxWriteWaitBeforeConnReuse
+const MaxWriteWaitBeforeConnReuse = maxWriteWaitBeforeConnReuse
 
 func init() {
 	// We only want to pay for this cost during testing.
@@ -60,7 +60,7 @@ func init() {
 	}
 }
 
-func CondSkipHTTP2(t testing.TB) {
+func CondSkipHTTP2(t *testing.T) {
 	if omitBundledHTTP2 {
 		t.Skip("skipping HTTP/2 test when nethttpomithttp2 build tag in use")
 	}
@@ -72,6 +72,8 @@ var (
 )
 
 func SetReadLoopBeforeNextReadHook(f func()) {
+	testHookMu.Lock()
+	defer testHookMu.Unlock()
 	unnilTestHook(&f)
 	testHookReadLoopBeforeNextRead = f
 }
@@ -142,11 +144,9 @@ func (t *Transport) IdleConnStrsForTesting_h2() []string {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 
-	for k, ccs := range pool.conns {
-		for _, cc := range ccs {
-			if cc.idleState().canTakeNewRequest {
-				ret = append(ret, k)
-			}
+	for k, cc := range pool.conns {
+		for range cc {
+			ret = append(ret, k)
 		}
 	}
 

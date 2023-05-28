@@ -228,7 +228,7 @@ func TestMultiReaderCopy(t *testing.T) {
 
 // Test that MultiWriter copies the input slice and is insulated from future modification.
 func TestMultiWriterCopy(t *testing.T) {
-	var buf strings.Builder
+	var buf bytes.Buffer
 	slice := []Writer{&buf}
 	w := MultiWriter(slice...)
 	slice[0] = nil

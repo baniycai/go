@@ -58,7 +58,6 @@ func makeValue(r ref) Value {
 	return Value{ref: r, gcPtr: gcPtr}
 }
 
-//go:wasmimport gojs syscall/js.finalizeRef
 func finalizeRef(r ref)
 
 func predefValue(id uint32, typeFlag byte) Value {
@@ -210,7 +209,6 @@ func ValueOf(x any) Value {
 	}
 }
 
-//go:wasmimport gojs syscall/js.stringVal
 func stringVal(x string) ref
 
 // Type represents the JavaScript type of a Value.
@@ -294,7 +292,6 @@ func (v Value) Get(p string) Value {
 	return r
 }
 
-//go:wasmimport gojs syscall/js.valueGet
 func valueGet(v ref, p string) ref
 
 // Set sets the JavaScript property p of value v to ValueOf(x).
@@ -309,7 +306,6 @@ func (v Value) Set(p string, x any) {
 	runtime.KeepAlive(xv)
 }
 
-//go:wasmimport gojs syscall/js.valueSet
 func valueSet(v ref, p string, x ref)
 
 // Delete deletes the JavaScript property p of value v.
@@ -322,7 +318,6 @@ func (v Value) Delete(p string) {
 	runtime.KeepAlive(v)
 }
 
-//go:wasmimport gojs syscall/js.valueDelete
 func valueDelete(v ref, p string)
 
 // Index returns JavaScript index i of value v.
@@ -336,7 +331,6 @@ func (v Value) Index(i int) Value {
 	return r
 }
 
-//go:wasmimport gojs syscall/js.valueIndex
 func valueIndex(v ref, i int) ref
 
 // SetIndex sets the JavaScript index i of value v to ValueOf(x).
@@ -351,7 +345,6 @@ func (v Value) SetIndex(i int, x any) {
 	runtime.KeepAlive(xv)
 }
 
-//go:wasmimport gojs syscall/js.valueSetIndex
 func valueSetIndex(v ref, i int, x ref)
 
 func makeArgs(args []any) ([]Value, []ref) {
@@ -376,7 +369,6 @@ func (v Value) Length() int {
 	return r
 }
 
-//go:wasmimport gojs syscall/js.valueLength
 func valueLength(v ref) int
 
 // Call does a JavaScript call to the method m of value v with the given arguments.
@@ -399,8 +391,6 @@ func (v Value) Call(m string, args ...any) Value {
 	return makeValue(res)
 }
 
-//go:wasmimport gojs syscall/js.valueCall
-//go:nosplit
 func valueCall(v ref, m string, args []ref) (ref, bool)
 
 // Invoke does a JavaScript call of the value v with the given arguments.
@@ -420,7 +410,6 @@ func (v Value) Invoke(args ...any) Value {
 	return makeValue(res)
 }
 
-//go:wasmimport gojs syscall/js.valueInvoke
 func valueInvoke(v ref, args []ref) (ref, bool)
 
 // New uses JavaScript's "new" operator with value v as constructor and the given arguments.
@@ -440,7 +429,6 @@ func (v Value) New(args ...any) Value {
 	return makeValue(res)
 }
 
-//go:wasmimport gojs syscall/js.valueNew
 func valueNew(v ref, args []ref) (ref, bool)
 
 func (v Value) isNumber() bool {
@@ -540,10 +528,8 @@ func jsString(v Value) string {
 	return string(b)
 }
 
-//go:wasmimport gojs syscall/js.valuePrepareString
 func valuePrepareString(v ref) (ref, int)
 
-//go:wasmimport gojs syscall/js.valueLoadString
 func valueLoadString(v ref, b []byte)
 
 // InstanceOf reports whether v is an instance of type t according to JavaScript's instanceof operator.
@@ -554,7 +540,6 @@ func (v Value) InstanceOf(t Value) bool {
 	return r
 }
 
-//go:wasmimport gojs syscall/js.valueInstanceOf
 func valueInstanceOf(v ref, t ref) bool
 
 // A ValueError occurs when a Value method is invoked on
@@ -570,7 +555,7 @@ func (e *ValueError) Error() string {
 }
 
 // CopyBytesToGo copies bytes from src to dst.
-// It panics if src is not a Uint8Array or Uint8ClampedArray.
+// It panics if src is not an Uint8Array or Uint8ClampedArray.
 // It returns the number of bytes copied, which will be the minimum of the lengths of src and dst.
 func CopyBytesToGo(dst []byte, src Value) int {
 	n, ok := copyBytesToGo(dst, src.ref)
@@ -581,11 +566,10 @@ func CopyBytesToGo(dst []byte, src Value) int {
 	return n
 }
 
-//go:wasmimport gojs syscall/js.copyBytesToGo
 func copyBytesToGo(dst []byte, src ref) (int, bool)
 
 // CopyBytesToJS copies bytes from src to dst.
-// It panics if dst is not a Uint8Array or Uint8ClampedArray.
+// It panics if dst is not an Uint8Array or Uint8ClampedArray.
 // It returns the number of bytes copied, which will be the minimum of the lengths of src and dst.
 func CopyBytesToJS(dst Value, src []byte) int {
 	n, ok := copyBytesToJS(dst.ref, src)
@@ -596,5 +580,4 @@ func CopyBytesToJS(dst Value, src []byte) int {
 	return n
 }
 
-//go:wasmimport gojs syscall/js.copyBytesToJS
 func copyBytesToJS(dst ref, src []byte) (int, bool)

@@ -188,7 +188,7 @@ func TestDumper(t *testing.T) {
 }
 
 func TestDumper_doubleclose(t *testing.T) {
-	var out strings.Builder
+	var out bytes.Buffer
 	dumper := Dumper(&out)
 
 	dumper.Write([]byte(`gopher`))
@@ -204,7 +204,7 @@ func TestDumper_doubleclose(t *testing.T) {
 }
 
 func TestDumper_earlyclose(t *testing.T) {
-	var out strings.Builder
+	var out bytes.Buffer
 	dumper := Dumper(&out)
 
 	dumper.Close()

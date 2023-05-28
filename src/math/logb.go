@@ -44,7 +44,7 @@ func Ilogb(x float64) int {
 	return ilogb(x)
 }
 
-// ilogb returns the binary exponent of x. It assumes x is finite and
+// logb returns the binary exponent of x. It assumes x is finite and
 // non-zero.
 func ilogb(x float64) int {
 	x, exp := normalize(x)

@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"strings"
@@ -18,7 +19,7 @@ import (
 // ToSymbolFunc returns a function that may be used to convert a
 // package path into a string suitable for use as a symbol.
 // cmd is the gccgo/GoLLVM compiler in use, and tmpdir is a temporary
-// directory to pass to os.CreateTemp().
+// directory to pass to ioutil.TempFile.
 // For example, this returns a function that converts "net/http"
 // into a string like "net..z2fhttp". The actual string varies for
 // different gccgo/GoLLVM versions, which is why this returns a function
@@ -31,7 +32,7 @@ func ToSymbolFunc(cmd, tmpdir string) (func(string) string, error) {
 	// the same string. More recent versions use a new mangler
 	// that avoids these collisions.
 	const filepat = "*_gccgo_manglechck.go"
-	f, err := os.CreateTemp(tmpdir, filepat)
+	f, err := ioutil.TempFile(tmpdir, filepat)
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +40,7 @@ func ToSymbolFunc(cmd, tmpdir string) (func(string) string, error) {
 	f.Close()
 	defer os.Remove(gofilename)
 
-	if err := os.WriteFile(gofilename, []byte(mangleCheckCode), 0644); err != nil {
+	if err := ioutil.WriteFile(gofilename, []byte(mangleCheckCode), 0644); err != nil {
 		return nil, err
 	}
 
@@ -86,11 +87,13 @@ func toSymbolV1(ppath string) string {
 
 // toSymbolV2 converts a package path using the second mangling scheme.
 func toSymbolV2(ppath string) string {
-	var bsl strings.Builder
+	// This has to build at boostrap time, so it has to build
+	// with Go 1.4, so we don't use strings.Builder.
+	bsl := make([]byte, 0, len(ppath))
 	changed := false
 	for _, c := range ppath {
 		if ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z') || ('0' <= c && c <= '9') || c == '_' {
-			bsl.WriteByte(byte(c))
+			bsl = append(bsl, byte(c))
 			continue
 		}
 		var enc string
@@ -104,13 +107,13 @@ func toSymbolV2(ppath string) string {
 		default:
 			enc = fmt.Sprintf("..U%08x", c)
 		}
-		bsl.WriteString(enc)
+		bsl = append(bsl, enc...)
 		changed = true
 	}
 	if !changed {
 		return ppath
 	}
-	return bsl.String()
+	return string(bsl)
 }
 
 // v3UnderscoreCodes maps from a character that supports an underscore
@@ -134,18 +137,19 @@ var v3UnderscoreCodes = map[byte]byte{
 
 // toSymbolV3 converts a package path using the third mangling scheme.
 func toSymbolV3(ppath string) string {
-	var bsl strings.Builder
+	// This has to build at boostrap time, so it has to build
+	// with Go 1.4, so we don't use strings.Builder.
+	bsl := make([]byte, 0, len(ppath))
 	changed := false
 	for _, c := range ppath {
 		if ('A' <= c && c <= 'Z') || ('a' <= c && c <= 'z') || ('0' <= c && c <= '9') {
-			bsl.WriteByte(byte(c))
+			bsl = append(bsl, byte(c))
 			continue
 		}
 
 		if c < 0x80 {
 			if u, ok := v3UnderscoreCodes[byte(c)]; ok {
-				bsl.WriteByte('_')
-				bsl.WriteByte(u)
+				bsl = append(bsl, '_', u)
 				changed = true
 				continue
 			}
@@ -160,11 +164,11 @@ func toSymbolV3(ppath string) string {
 		default:
 			enc = fmt.Sprintf("_U%08x", c)
 		}
-		bsl.WriteString(enc)
+		bsl = append(bsl, enc...)
 		changed = true
 	}
 	if !changed {
 		return ppath
 	}
-	return bsl.String()
+	return string(bsl)
 }

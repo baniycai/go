@@ -4,10 +4,8 @@
 
 package syscall
 
-import "unsafe"
-
-func IoctlPtr(fd, req uintptr, arg unsafe.Pointer) Errno {
-	err := ioctlPtr(int(fd), uint(req), arg)
+func Ioctl(fd, req, arg uintptr) Errno {
+	err := ioctl(int(fd), int(req), int(arg))
 	if err != nil {
 		return err.(Errno)
 	}

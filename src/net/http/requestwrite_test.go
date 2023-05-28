@@ -629,7 +629,7 @@ func TestRequestWrite(t *testing.T) {
 			tt.Req.Header = make(Header)
 		}
 
-		var braw strings.Builder
+		var braw bytes.Buffer
 		err := tt.Req.Write(&braw)
 		if g, e := fmt.Sprintf("%v", err), fmt.Sprintf("%v", tt.WantError); g != e {
 			t.Errorf("writing #%d, err = %q, want %q", i, g, e)
@@ -649,7 +649,7 @@ func TestRequestWrite(t *testing.T) {
 
 		if tt.WantProxy != "" {
 			setBody()
-			var praw strings.Builder
+			var praw bytes.Buffer
 			err = tt.Req.WriteProxy(&praw)
 			if err != nil {
 				t.Errorf("WriteProxy #%d: %s", i, err)
@@ -815,7 +815,7 @@ func TestRequestWriteClosesBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	buf := new(strings.Builder)
+	buf := new(bytes.Buffer)
 	if err := req.Write(buf); err != nil {
 		t.Error(err)
 	}

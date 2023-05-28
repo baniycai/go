@@ -28,7 +28,7 @@ func TestDisableSSE3(t *testing.T) {
 func TestSSE3DebugOption(t *testing.T) {
 	MustHaveDebugOptionsSupport(t)
 
-	if godebug.New("#cpu.sse3").Value() != "off" {
+	if godebug.Get("cpu.sse3") != "off" {
 		t.Skipf("skipping test: GODEBUG=cpu.sse3=off not set")
 	}
 

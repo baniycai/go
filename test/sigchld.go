@@ -1,4 +1,4 @@
-// +build !plan9,!windows,!wasip1
+// +build !plan9,!windows
 // run
 
 // Copyright 2009 The Go Authors. All rights reserved.

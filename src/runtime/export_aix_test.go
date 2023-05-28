@@ -4,4 +4,5 @@
 
 package runtime
 
+var Fcntl = syscall_fcntl1
 var SetNonblock = setNonblock

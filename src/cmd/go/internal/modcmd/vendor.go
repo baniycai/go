@@ -21,13 +21,13 @@ import (
 	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/fsys"
-	"cmd/go/internal/gover"
 	"cmd/go/internal/imports"
 	"cmd/go/internal/load"
 	"cmd/go/internal/modload"
 	"cmd/go/internal/str"
 
 	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
 )
 
 var cmdVendor = &base.Command{
@@ -61,7 +61,6 @@ func init() {
 	cmdVendor.Flag.BoolVar(&cfg.BuildV, "v", false, "")
 	cmdVendor.Flag.BoolVar(&vendorE, "e", false, "")
 	cmdVendor.Flag.StringVar(&vendorO, "o", "", "")
-	base.AddChdirFlag(&cmdVendor.Flag)
 	base.AddModCommonFlags(&cmdVendor.Flag)
 }
 
@@ -108,7 +107,7 @@ func runVendor(ctx context.Context, cmd *base.Command, args []string) {
 	includeGoVersions := false
 	isExplicit := map[module.Version]bool{}
 	if gv := modload.ModFile().Go; gv != nil {
-		if gover.Compare(gv.Version, "1.14") >= 0 {
+		if semver.Compare("v"+gv.Version, "v1.14") >= 0 {
 			// If the Go version is at least 1.14, annotate all explicit 'require' and
 			// 'replace' targets found in the go.mod file so that we can perform a
 			// stronger consistency check when -mod=vendor is set.
@@ -117,7 +116,7 @@ func runVendor(ctx context.Context, cmd *base.Command, args []string) {
 			}
 			includeAllReplacements = true
 		}
-		if gover.Compare(gv.Version, "1.17") >= 0 {
+		if semver.Compare("v"+gv.Version, "v1.17") >= 0 {
 			// If the Go version is at least 1.17, annotate all modules with their
 			// 'go' version directives.
 			includeGoVersions = true
@@ -133,7 +132,7 @@ func runVendor(ctx context.Context, cmd *base.Command, args []string) {
 			vendorMods = append(vendorMods, m)
 		}
 	}
-	gover.ModSort(vendorMods)
+	module.Sort(vendorMods)
 
 	var (
 		buf bytes.Buffer
@@ -211,9 +210,6 @@ func moduleLine(m, r module.Version) string {
 		b.WriteString(m.Version)
 	}
 	if r.Path != "" {
-		if str.HasFilePathPrefix(filepath.Clean(r.Path), "vendor") {
-			base.Fatalf("go: replacement path %s inside vendor directory", r.Path)
-		}
 		b.WriteString(" => ")
 		b.WriteString(r.Path)
 		if r.Version != "" {
@@ -226,25 +222,20 @@ func moduleLine(m, r module.Version) string {
 }
 
 func vendorPkg(vdir, pkg string) {
-	src, realPath, _ := modload.Lookup("", false, pkg)
-	if src == "" {
-		base.Errorf("internal error: no pkg for %s\n", pkg)
-		return
-	}
-	if realPath != pkg {
-		// TODO(#26904): Revisit whether this behavior still makes sense.
-		// This should actually be impossible today, because the import map is the
-		// identity function for packages outside of the standard library.
-		//
-		// Part of the purpose of the vendor directory is to allow the packages in
-		// the module to continue to build in GOPATH mode, and GOPATH-mode users
-		// won't know about replacement aliasing. How important is it to maintain
-		// compatibility?
+	// TODO(#42504): Instead of calling modload.ImportMap then build.ImportDir,
+	// just call load.PackagesAndErrors. To do that, we need to add a good way
+	// to ignore build constraints.
+	realPath := modload.ImportMap(pkg)
+	if realPath != pkg && modload.ImportMap(realPath) != "" {
 		fmt.Fprintf(os.Stderr, "warning: %s imported as both %s and %s; making two copies.\n", realPath, realPath, pkg)
 	}
 
 	copiedFiles := make(map[string]bool)
 	dst := filepath.Join(vdir, pkg)
+	src := modload.PackageDir(realPath)
+	if src == "" {
+		fmt.Fprintf(os.Stderr, "internal error: no pkg for %s -> %s\n", pkg, realPath)
+	}
 	copyDir(dst, src, matchPotentialSourceFile, copiedFiles)
 	if m := modload.PackageModule(realPath); m.Path != "" {
 		copyMetadata(m.Path, realPath, dst, src, copiedFiles)
@@ -367,7 +358,7 @@ func matchPotentialSourceFile(dir string, info fs.DirEntry) bool {
 		return false
 	}
 	if info.Name() == "go.mod" || info.Name() == "go.sum" {
-		if gv := modload.ModFile().Go; gv != nil && gover.Compare(gv.Version, "1.17") >= 0 {
+		if gv := modload.ModFile().Go; gv != nil && semver.Compare("v"+gv.Version, "v1.17") >= 0 {
 			// As of Go 1.17, we strip go.mod and go.sum files from dependency modules.
 			// Otherwise, 'go' commands invoked within the vendor subtree may misidentify
 			// an arbitrary directory within the vendor tree as a module root.

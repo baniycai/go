@@ -161,13 +161,8 @@ func sysctl_trampoline()
 
 //go:nosplit
 //go:cgo_unsafe_args
-func fcntl(fd, cmd, arg int32) (ret int32, errno int32) {
-	args := struct {
-		fd, cmd, arg int32
-		ret, errno   int32
-	}{fd, cmd, arg, 0, 0}
-	libcCall(unsafe.Pointer(abi.FuncPCABI0(fcntl_trampoline)), unsafe.Pointer(&args))
-	return args.ret, args.errno
+func fcntl(fd, cmd, arg int32) int32 {
+	return libcCall(unsafe.Pointer(abi.FuncPCABI0(fcntl_trampoline)), unsafe.Pointer(&fd))
 }
 func fcntl_trampoline()
 
@@ -255,7 +250,11 @@ func sigaltstack_trampoline()
 
 // Not used on OpenBSD, but must be defined.
 func exitThread(wait *atomic.Uint32) {
-	throw("exitThread")
+}
+
+//go:nosplit
+func closeonexec(fd int32) {
+	fcntl(fd, _F_SETFD, _FD_CLOEXEC)
 }
 
 // Tell the linker that the libc_* functions are to be found

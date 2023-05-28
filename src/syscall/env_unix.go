@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build unix || (js && wasm) || plan9 || wasip1
+//go:build unix || (js && wasm) || plan9
 
 // Unix environment variables.
 
@@ -30,6 +30,11 @@ var (
 )
 
 func runtime_envs() []string // in package runtime
+
+// setenv_c and unsetenv_c are provided by the runtime but are no-ops
+// if cgo isn't loaded.
+func setenv_c(k, v string)
+func unsetenv_c(k string)
 
 func copyenv() {
 	env = make(map[string]int)
@@ -62,7 +67,7 @@ func Unsetenv(key string) error {
 		envs[i] = ""
 		delete(env, key)
 	}
-	runtimeUnsetenv(key)
+	unsetenv_c(key)
 	return nil
 }
 
@@ -119,7 +124,7 @@ func Setenv(key, value string) error {
 		envs = append(envs, kv)
 	}
 	env[key] = i
-	runtimeSetenv(key, value)
+	setenv_c(key, value)
 	return nil
 }
 
@@ -130,7 +135,7 @@ func Clearenv() {
 	defer envLock.Unlock()
 
 	for k := range env {
-		runtimeUnsetenv(k)
+		unsetenv_c(k)
 	}
 	env = make(map[string]int)
 	envs = []string{}

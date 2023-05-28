@@ -236,7 +236,6 @@ type ExportedFormattedType struct {
 	//	a.ExportedField = 123
 	//
 	// Text after pre-formatted block.
-	//ignore:directive
 	ExportedField int
 }
 

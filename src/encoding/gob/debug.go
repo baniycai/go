@@ -465,7 +465,8 @@ func (deb *debugger) singletonValue(indent tab, id typeId) {
 	deb.dump("Singleton value")
 	// is it a builtin type?
 	wire := deb.wireType[id]
-	if builtinIdToType(id) == nil && wire == nil {
+	_, ok := builtinIdToType[id]
+	if !ok && wire == nil {
 		errorf("type id %d not defined", id)
 	}
 	m := deb.uint64()
@@ -572,7 +573,8 @@ func (deb *debugger) printWireType(indent tab, wire *wireType) {
 //
 //	builtinValue | ArrayValue | MapValue | SliceValue | StructValue | InterfaceValue
 func (deb *debugger) fieldValue(indent tab, id typeId) {
-	if builtinIdToType(id) != nil {
+	_, ok := builtinIdToType[id]
+	if ok {
 		if id == tInterface {
 			deb.interfaceValue(indent)
 		} else {

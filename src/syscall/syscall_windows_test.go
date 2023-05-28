@@ -15,28 +15,6 @@ import (
 	"testing"
 )
 
-func TestOpen_Dir(t *testing.T) {
-	dir := t.TempDir()
-
-	h, err := syscall.Open(dir, syscall.O_RDONLY, 0)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-	syscall.CloseHandle(h)
-	h, err = syscall.Open(dir, syscall.O_RDONLY|syscall.O_TRUNC, 0)
-	if err == nil {
-		t.Error("Open should have failed")
-	} else {
-		syscall.CloseHandle(h)
-	}
-	h, err = syscall.Open(dir, syscall.O_RDONLY|syscall.O_CREAT, 0)
-	if err == nil {
-		t.Error("Open should have failed")
-	} else {
-		syscall.CloseHandle(h)
-	}
-}
-
 func TestWin32finddata(t *testing.T) {
 	dir := t.TempDir()
 
@@ -168,32 +146,4 @@ int main(int argc, char *argv[])
 	if have != want {
 		t.Fatalf("c program output is wrong: got %q, want %q", have, want)
 	}
-}
-
-func FuzzUTF16FromString(f *testing.F) {
-	f.Add("hi")           // ASCII
-	f.Add("â")            // latin1
-	f.Add("ねこ")           // plane 0
-	f.Add("😃")            // extra Plane 0
-	f.Add("\x90")         // invalid byte
-	f.Add("\xe3\x81")     // truncated
-	f.Add("\xe3\xc1\x81") // invalid middle byte
-
-	f.Fuzz(func(t *testing.T, tst string) {
-		res, err := syscall.UTF16FromString(tst)
-		if err != nil {
-			if strings.Contains(tst, "\x00") {
-				t.Skipf("input %q contains a NUL byte", tst)
-			}
-			t.Fatalf("UTF16FromString(%q): %v", tst, err)
-		}
-		t.Logf("UTF16FromString(%q) = %04x", tst, res)
-
-		if len(res) < 1 || res[len(res)-1] != 0 {
-			t.Fatalf("missing NUL terminator")
-		}
-		if len(res) > len(tst)+1 {
-			t.Fatalf("len(%04x) > len(%q)+1", res, tst)
-		}
-	})
 }

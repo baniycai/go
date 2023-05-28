@@ -5,7 +5,7 @@
 package ld
 
 import (
-	"internal/unsafeheader"
+	"reflect"
 	"syscall"
 	"unsafe"
 )
@@ -35,8 +35,8 @@ func (out *OutBuf) Mmap(filesize uint64) error {
 	if err != nil {
 		return err
 	}
-	bufHdr := (*unsafeheader.Slice)(unsafe.Pointer(&out.buf))
-	bufHdr.Data = unsafe.Pointer(ptr)
+	bufHdr := (*reflect.SliceHeader)(unsafe.Pointer(&out.buf))
+	bufHdr.Data = ptr
 	bufHdr.Len = int(filesize)
 	bufHdr.Cap = int(filesize)
 

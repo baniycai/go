@@ -48,7 +48,7 @@ func kqueue() int32
 func kevent(kq int32, ch *keventt, nch int32, ev *keventt, nev int32, ts *timespec) int32
 
 func pipe2(flags int32) (r, w int32, errno int32)
-func fcntl(fd, cmd, arg int32) (ret int32, errno int32)
+func closeonexec(fd int32)
 
 // From FreeBSD's <sys/sysctl.h>
 const (
@@ -213,14 +213,10 @@ func newosproc(mp *m) {
 
 	var oset sigset
 	sigprocmask(_SIG_SETMASK, &sigset_all, &oset)
-	ret := retryOnEAGAIN(func() int32 {
-		errno := thr_new(&param, int32(unsafe.Sizeof(param)))
-		// thr_new returns negative errno
-		return -errno
-	})
+	ret := thr_new(&param, int32(unsafe.Sizeof(param)))
 	sigprocmask(_SIG_SETMASK, &oset, nil)
-	if ret != 0 {
-		print("runtime: failed to create new OS thread (have ", mcount(), " already; errno=", ret, ")\n")
+	if ret < 0 {
+		print("runtime: failed to create new OS thread (have ", mcount(), " already; errno=", -ret, ")\n")
 		throw("newosproc")
 	}
 }
@@ -231,7 +227,7 @@ func newosproc(mp *m) {
 func newosproc0(stacksize uintptr, fn unsafe.Pointer) {
 	stack := sysAlloc(stacksize, &memstats.stacks_sys)
 	if stack == nil {
-		writeErrStr(failallocatestack)
+		write(2, unsafe.Pointer(&failallocatestack[0]), int32(len(failallocatestack)))
 		exit(1)
 	}
 	// This code "knows" it's being called once from the library
@@ -256,10 +252,13 @@ func newosproc0(stacksize uintptr, fn unsafe.Pointer) {
 	ret := thr_new(&param, int32(unsafe.Sizeof(param)))
 	sigprocmask(_SIG_SETMASK, &oset, nil)
 	if ret < 0 {
-		writeErrStr(failthreadcreate)
+		write(2, unsafe.Pointer(&failthreadcreate[0]), int32(len(failthreadcreate)))
 		exit(1)
 	}
 }
+
+var failallocatestack = []byte("runtime: failed to allocate stack for the new OS thread\n")
+var failthreadcreate = []byte("runtime: failed to create new OS thread\n")
 
 // Called to do synchronous initialization of Go code built with
 // -buildmode=c-archive or -buildmode=c-shared.
@@ -363,7 +362,7 @@ func getsig(i uint32) uintptr {
 	return sa.sa_handler
 }
 
-// setSignalstackSP sets the ss_sp field of a stackt.
+// setSignaltstackSP sets the ss_sp field of a stackt.
 //
 //go:nosplit
 func setSignalstackSP(s *stackt, sp uintptr) {
@@ -409,9 +408,8 @@ func sysargs(argc int32, argv **byte) {
 	n++
 
 	// now argv+n is auxv
-	auxvp := (*[1 << 28]uintptr)(add(unsafe.Pointer(argv), uintptr(n)*goarch.PtrSize))
-	pairs := sysauxv(auxvp[:])
-	auxv = auxvp[: pairs*2 : pairs*2]
+	auxv := (*[1 << 28]uintptr)(add(unsafe.Pointer(argv), uintptr(n)*goarch.PtrSize))
+	sysauxv(auxv[:])
 }
 
 const (
@@ -422,9 +420,8 @@ const (
 	_AT_HWCAP2   = 26 // CPU feature flags 2
 )
 
-func sysauxv(auxv []uintptr) (pairs int) {
-	var i int
-	for i = 0; auxv[i] != _AT_NULL; i += 2 {
+func sysauxv(auxv []uintptr) {
+	for i := 0; auxv[i] != _AT_NULL; i += 2 {
 		tag, val := auxv[i], auxv[i+1]
 		switch tag {
 		// _AT_NCPUS from auxv shouldn't be used due to golang.org/issue/15206
@@ -436,7 +433,6 @@ func sysauxv(auxv []uintptr) (pairs int) {
 
 		archauxv(tag, val)
 	}
-	return i / 2
 }
 
 // sysSigaction calls the sigaction system call.

@@ -164,10 +164,7 @@ func (d *decoder) fill() error {
 	n, err := d.r.Read(d.bytes.buf[d.bytes.j:])
 	d.bytes.j += n
 	if n > 0 {
-		return nil
-	}
-	if err == io.EOF {
-		err = io.ErrUnexpectedEOF
+		err = nil
 	}
 	return err
 }
@@ -264,6 +261,9 @@ func (d *decoder) readFull(p []byte) error {
 			break
 		}
 		if err := d.fill(); err != nil {
+			if err == io.EOF {
+				err = io.ErrUnexpectedEOF
+			}
 			return err
 		}
 	}
@@ -291,6 +291,9 @@ func (d *decoder) ignore(n int) error {
 			break
 		}
 		if err := d.fill(); err != nil {
+			if err == io.EOF {
+				err = io.ErrUnexpectedEOF
+			}
 			return err
 		}
 	}

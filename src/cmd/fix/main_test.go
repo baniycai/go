@@ -5,11 +5,9 @@
 package main
 
 import (
-	"fmt"
 	"go/ast"
 	"go/parser"
 	"internal/diff"
-	"internal/testenv"
 	"strings"
 	"testing"
 )
@@ -77,33 +75,11 @@ func parseFixPrint(t *testing.T, fn func(*ast.File) bool, desc, in string, mustB
 }
 
 func TestRewrite(t *testing.T) {
-	// If cgo is enabled, enforce that cgo commands invoked by cmd/fix
-	// do not fail during testing.
-	if testenv.HasCGO() {
-		testenv.MustHaveGoBuild(t) // Really just 'go tool cgo', but close enough.
-
-		// The reportCgoError hook is global, so we can't set it per-test
-		// if we want to be able to run those tests in parallel.
-		// Instead, simply set it to panic on error: the goroutine dump
-		// from the panic should help us determine which test failed.
-		prevReportCgoError := reportCgoError
-		reportCgoError = func(err error) {
-			panic(fmt.Sprintf("unexpected cgo error: %v", err))
-		}
-		t.Cleanup(func() { reportCgoError = prevReportCgoError })
-	}
-
 	for _, tt := range testCases {
 		tt := tt
 		t.Run(tt.Name, func(t *testing.T) {
 			if tt.Version == 0 {
-				if testing.Verbose() {
-					// Don't run in parallel: cmd/fix sometimes writes directly to stderr,
-					// and since -v prints which test is currently running we want that
-					// information to accurately correlate with the stderr output.
-				} else {
-					t.Parallel()
-				}
+				t.Parallel()
 			} else {
 				old := goVersion
 				goVersion = tt.Version

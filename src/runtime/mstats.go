@@ -45,6 +45,8 @@ type mstats struct {
 
 	enablegc bool
 
+	_ uint32 // ensure gcPauseDist is aligned.
+
 	// gcPauseDist represents the distribution of all GC-related
 	// application pauses in the runtime.
 	//
@@ -332,6 +334,10 @@ func init() {
 		println(offset)
 		throw("memstats.heapStats not aligned to 8 bytes")
 	}
+	if offset := unsafe.Offsetof(memstats.gcPauseDist); offset%8 != 0 {
+		println(offset)
+		throw("memstats.gcPauseDist not aligned to 8 bytes")
+	}
 	// Ensure the size of heapStatsDelta causes adjacent fields/slots (e.g.
 	// [3]heapStatsDelta) to be 8-byte aligned.
 	if size := unsafe.Sizeof(heapStatsDelta{}); size%8 != 0 {
@@ -347,7 +353,7 @@ func init() {
 // which is a snapshot as of the most recently completed garbage
 // collection cycle.
 func ReadMemStats(m *MemStats) {
-	stopTheWorld(stwReadMemStats)
+	stopTheWorld("read mem stats")
 
 	systemstack(func() {
 		readmemstats_m(m)
@@ -727,7 +733,8 @@ type consistentHeapStats struct {
 
 	// gen represents the current index into which writers
 	// are writing, and can take on the value of 0, 1, or 2.
-	gen atomic.Uint32
+	// This value is updated atomically.
+	gen uint32
 
 	// noPLock is intended to provide mutual exclusion for updating
 	// stats when no P is available. It does not block other writers
@@ -756,7 +763,7 @@ type consistentHeapStats struct {
 //go:nosplit
 func (m *consistentHeapStats) acquire() *heapStatsDelta {
 	if pp := getg().m.p.ptr(); pp != nil {
-		seq := pp.statsSeq.Add(1)
+		seq := atomic.Xadd(&pp.statsSeq, 1)
 		if seq%2 == 0 {
 			// Should have been incremented to odd.
 			print("runtime: seq=", seq, "\n")
@@ -765,7 +772,7 @@ func (m *consistentHeapStats) acquire() *heapStatsDelta {
 	} else {
 		lock(&m.noPLock)
 	}
-	gen := m.gen.Load() % 3
+	gen := atomic.Load(&m.gen) % 3
 	return &m.stats[gen]
 }
 
@@ -785,7 +792,7 @@ func (m *consistentHeapStats) acquire() *heapStatsDelta {
 //go:nosplit
 func (m *consistentHeapStats) release() {
 	if pp := getg().m.p.ptr(); pp != nil {
-		seq := pp.statsSeq.Add(1)
+		seq := atomic.Xadd(&pp.statsSeq, 1)
 		if seq%2 != 0 {
 			// Should have been incremented to even.
 			print("runtime: seq=", seq, "\n")
@@ -836,7 +843,7 @@ func (m *consistentHeapStats) read(out *heapStatsDelta) {
 	// Get the current generation. We can be confident that this
 	// will not change since read is serialized and is the only
 	// one that modifies currGen.
-	currGen := m.gen.Load()
+	currGen := atomic.Load(&m.gen)
 	prevGen := currGen - 1
 	if currGen == 0 {
 		prevGen = 2
@@ -851,7 +858,7 @@ func (m *consistentHeapStats) read(out *heapStatsDelta) {
 	//
 	// This exchange is safe to do because we won't race
 	// with anyone else trying to update this value.
-	m.gen.Swap((currGen + 1) % 3)
+	atomic.Xchg(&m.gen, (currGen+1)%3)
 
 	// Allow P-less writers to continue. They'll be writing to the
 	// next generation now.
@@ -859,7 +866,7 @@ func (m *consistentHeapStats) read(out *heapStatsDelta) {
 
 	for _, p := range allp {
 		// Spin until there are no more writers.
-		for p.statsSeq.Load()%2 != 0 {
+		for atomic.Load(&p.statsSeq)%2 != 0 {
 		}
 	}
 
@@ -878,81 +885,4 @@ func (m *consistentHeapStats) read(out *heapStatsDelta) {
 	*out = m.stats[currGen]
 
 	releasem(mp)
-}
-
-type cpuStats struct {
-	// All fields are CPU time in nanoseconds computed by comparing
-	// calls of nanotime. This means they're all overestimates, because
-	// they don't accurately compute on-CPU time (so some of the time
-	// could be spent scheduled away by the OS).
-
-	gcAssistTime    int64 // GC assists
-	gcDedicatedTime int64 // GC dedicated mark workers + pauses
-	gcIdleTime      int64 // GC idle mark workers
-	gcPauseTime     int64 // GC pauses (all GOMAXPROCS, even if just 1 is running)
-	gcTotalTime     int64
-
-	scavengeAssistTime int64 // background scavenger
-	scavengeBgTime     int64 // scavenge assists
-	scavengeTotalTime  int64
-
-	idleTime int64 // Time Ps spent in _Pidle.
-	userTime int64 // Time Ps spent in _Prunning or _Psyscall that's not any of the above.
-
-	totalTime int64 // GOMAXPROCS * (monotonic wall clock time elapsed)
-}
-
-// accumulate takes a cpuStats and adds in the current state of all GC CPU
-// counters.
-//
-// gcMarkPhase indicates that we're in the mark phase and that certain counter
-// values should be used.
-func (s *cpuStats) accumulate(now int64, gcMarkPhase bool) {
-	// N.B. Mark termination and sweep termination pauses are
-	// accumulated in work.cpuStats at the end of their respective pauses.
-	var (
-		markAssistCpu     int64
-		markDedicatedCpu  int64
-		markFractionalCpu int64
-		markIdleCpu       int64
-	)
-	if gcMarkPhase {
-		// N.B. These stats may have stale values if the GC is not
-		// currently in the mark phase.
-		markAssistCpu = gcController.assistTime.Load()
-		markDedicatedCpu = gcController.dedicatedMarkTime.Load()
-		markFractionalCpu = gcController.fractionalMarkTime.Load()
-		markIdleCpu = gcController.idleMarkTime.Load()
-	}
-
-	// The rest of the stats below are either derived from the above or
-	// are reset on each mark termination.
-
-	scavAssistCpu := scavenge.assistTime.Load()
-	scavBgCpu := scavenge.backgroundTime.Load()
-
-	// Update cumulative GC CPU stats.
-	s.gcAssistTime += markAssistCpu
-	s.gcDedicatedTime += markDedicatedCpu + markFractionalCpu
-	s.gcIdleTime += markIdleCpu
-	s.gcTotalTime += markAssistCpu + markDedicatedCpu + markFractionalCpu + markIdleCpu
-
-	// Update cumulative scavenge CPU stats.
-	s.scavengeAssistTime += scavAssistCpu
-	s.scavengeBgTime += scavBgCpu
-	s.scavengeTotalTime += scavAssistCpu + scavBgCpu
-
-	// Update total CPU.
-	s.totalTime = sched.totaltime + (now-sched.procresizetime)*int64(gomaxprocs)
-	s.idleTime += sched.idleTime.Load()
-
-	// Compute userTime. We compute this indirectly as everything that's not the above.
-	//
-	// Since time spent in _Pgcstop is covered by gcPauseTime, and time spent in _Pidle
-	// is covered by idleTime, what we're left with is time spent in _Prunning and _Psyscall,
-	// the latter of which is fine because the P will either go idle or get used for something
-	// else via sysmon. Meanwhile if we subtract GC time from whatever's left, we get non-GC
-	// _Prunning time. Note that this still leaves time spent in sweeping and in the scheduler,
-	// but that's fine. The overwhelming majority of this time will be actual user time.
-	s.userTime = s.totalTime - (s.gcTotalTime + s.scavengeTotalTime + s.idleTime)
 }

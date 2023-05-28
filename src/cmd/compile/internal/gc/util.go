@@ -8,10 +8,11 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
-	tracepkg "runtime/trace"
 
 	"cmd/compile/internal/base"
 )
+
+var traceHandler func(string)
 
 func startProfile() {
 	if base.Flag.CPUProfile != "" {
@@ -63,20 +64,13 @@ func startProfile() {
 		if err != nil {
 			base.Fatalf("%v", err)
 		}
-		runtime.SetMutexProfileFraction(1)
+		startMutexProfiling()
 		base.AtExit(func() {
 			pprof.Lookup("mutex").WriteTo(f, 0)
 			f.Close()
 		})
 	}
-	if base.Flag.TraceProfile != "" {
-		f, err := os.Create(base.Flag.TraceProfile)
-		if err != nil {
-			base.Fatalf("%v", err)
-		}
-		if err := tracepkg.Start(f); err != nil {
-			base.Fatalf("%v", err)
-		}
-		base.AtExit(tracepkg.Stop)
+	if base.Flag.TraceProfile != "" && traceHandler != nil {
+		traceHandler(base.Flag.TraceProfile)
 	}
 }

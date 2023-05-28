@@ -7,7 +7,6 @@ package csv
 import (
 	"bytes"
 	"errors"
-	"strings"
 	"testing"
 )
 
@@ -51,7 +50,7 @@ var writeTests = []struct {
 
 func TestWrite(t *testing.T) {
 	for n, tt := range writeTests {
-		b := &strings.Builder{}
+		b := &bytes.Buffer{}
 		f := NewWriter(b)
 		f.UseCRLF = tt.UseCRLF
 		if tt.Comma != 0 {

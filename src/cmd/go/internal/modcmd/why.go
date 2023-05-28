@@ -58,7 +58,6 @@ var (
 
 func init() {
 	cmdWhy.Run = runWhy // break init cycle
-	base.AddChdirFlag(&cmdWhy.Flag)
 	base.AddModCommonFlags(&cmdWhy.Flag)
 }
 

@@ -21,5 +21,3 @@ func get(security SecurityMode, url *urlpkg.URL) (*Response, error) {
 }
 
 func openBrowser(url string) bool { return false }
-
-func isLocalHost(u *urlpkg.URL) bool { return false }

@@ -11,9 +11,8 @@ stdout '^sum.golang.org$'
 
 # Download direct from github.
 
-[!net:proxy.golang.org] skip
-[!net:sum.golang.org] skip
-[!git] skip
+[!net] skip
+[!exec:git] skip
 env GOSUMDB=sum.golang.org
 env GOPROXY=direct
 

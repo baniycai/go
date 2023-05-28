@@ -14,10 +14,7 @@ import (
 func setMimeInit(fn func()) (cleanup func()) {
 	once = sync.Once{}
 	testInitMime = fn
-	return func() {
-		testInitMime = nil
-		once = sync.Once{}
-	}
+	return func() { testInitMime = nil }
 }
 
 func clearMimeTypes() {

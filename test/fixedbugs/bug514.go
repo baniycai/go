@@ -4,18 +4,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build cgo
-
 package main
-
-import "runtime/cgo"
 
 type iface interface {
 	Get() int
 }
 
+//go:notinheap
 type notInHeap struct {
-	_ cgo.Incomplete
 	i int
 }
 
@@ -33,7 +29,7 @@ type embed struct {
 
 var val = 1234
 
-var valNotInHeap = notInHeap{i: val}
+var valNotInHeap = notInHeap{val}
 
 func main() {
 	i := val

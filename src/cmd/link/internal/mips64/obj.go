@@ -39,10 +39,8 @@ import (
 
 func Init() (*sys.Arch, ld.Arch) {
 	arch := sys.ArchMIPS64
-	musl := "/lib/ld-musl-mips64.so.1"
 	if buildcfg.GOARCH == "mips64le" {
 		arch = sys.ArchMIPS64LE
-		musl = "/lib/ld-musl-mips64el.so.1"
 	}
 
 	theArch := ld.Arch{
@@ -51,31 +49,22 @@ func Init() (*sys.Arch, ld.Arch) {
 		Minalign:         minAlign,
 		Dwarfregsp:       dwarfRegSP,
 		Dwarfreglr:       dwarfRegLR,
-		Adddynrel:        adddynrel,
 		Archinit:         archinit,
 		Archreloc:        archreloc,
 		Archrelocvariant: archrelocvariant,
 		Extreloc:         extreloc,
+		Elfreloc1:        elfreloc1,
+		ElfrelocSize:     24,
+		Elfsetupplt:      elfsetupplt,
 		Gentext:          gentext,
 		Machoreloc1:      machoreloc1,
 
-		ELF: ld.ELFArch{
-			Linuxdynld:     "/lib64/ld64.so.1",
-			LinuxdynldMusl: musl,
-			Freebsddynld:   "XXX",
-			Openbsddynld:   "/usr/libexec/ld.so",
-			Netbsddynld:    "XXX",
-			Dragonflydynld: "XXX",
-			Solarisdynld:   "XXX",
-
-			Reloc1:    elfreloc1,
-			RelocSize: 24,
-			SetupPLT:  elfsetupplt,
-
-			// Historically GNU ld creates a read-only
-			// .dynamic section.
-			DynamicReadOnly: true,
-		},
+		Linuxdynld:     "/lib64/ld64.so.1",
+		Freebsddynld:   "XXX",
+		Openbsddynld:   "/usr/libexec/ld.so",
+		Netbsddynld:    "XXX",
+		Dragonflydynld: "XXX",
+		Solarisdynld:   "XXX",
 	}
 
 	return arch, theArch
@@ -107,8 +96,4 @@ func archinit(ctxt *ld.Link) {
 			*ld.FlagRound = 0x10000
 		}
 	}
-
-	dynSymCount = 0
-	gotLocalCount = 0
-	gotSymIndex = 0
 }

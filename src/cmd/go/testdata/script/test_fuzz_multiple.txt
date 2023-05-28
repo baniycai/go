@@ -4,7 +4,6 @@
 
 [!fuzz] skip
 [short] skip
-env GOCACHE=$WORK/cache
 
 # With fuzzing disabled, multiple targets can be tested.
 go test ./...

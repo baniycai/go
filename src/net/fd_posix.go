@@ -7,8 +7,8 @@
 package net
 
 import (
-	"internal/poll"
-	"runtime"
+	"std/internal/poll"
+	"std/runtime"
 	"syscall"
 	"time"
 )

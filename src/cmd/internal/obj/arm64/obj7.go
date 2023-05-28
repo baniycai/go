@@ -35,33 +35,26 @@ import (
 	"cmd/internal/objabi"
 	"cmd/internal/src"
 	"cmd/internal/sys"
-	"internal/abi"
 	"internal/buildcfg"
 	"log"
 	"math"
 )
 
-// zrReplace is the set of instructions for which $0 in the From operand
-// should be replaced with REGZERO.
-var zrReplace = map[obj.As]bool{
-	AMOVD:  true,
-	AMOVW:  true,
-	AMOVWU: true,
-	AMOVH:  true,
-	AMOVHU: true,
-	AMOVB:  true,
-	AMOVBU: true,
-	ASBC:   true,
-	ASBCW:  true,
-	ASBCS:  true,
-	ASBCSW: true,
-	AADC:   true,
-	AADCW:  true,
-	AADCS:  true,
-	AADCSW: true,
-	AFMOVD: true,
-	AFMOVS: true,
-	AMSR:   true,
+var complements = []obj.As{
+	AADD:  ASUB,
+	AADDW: ASUBW,
+	ASUB:  AADD,
+	ASUBW: AADDW,
+	ACMP:  ACMN,
+	ACMPW: ACMNW,
+	ACMN:  ACMP,
+	ACMNW: ACMPW,
+}
+
+// noZRreplace is the set of instructions for which $0 in the To operand
+// should NOT be replaced with REGZERO.
+var noZRreplace = map[obj.As]bool{
+	APRFM: true,
 }
 
 func (c *ctxt7) stacksplit(p *obj.Prog, framesize int32) *obj.Prog {
@@ -170,7 +163,7 @@ func (c *ctxt7) stacksplit(p *obj.Prog, framesize int32) *obj.Prog {
 	p = c.ctxt.StartUnsafePoint(p, c.newprog)
 
 	q := (*obj.Prog)(nil)
-	if framesize <= abi.StackSmall {
+	if framesize <= objabi.StackSmall {
 		// small stack: SP < stackguard
 		//	CMP	stackguard, SP
 
@@ -179,7 +172,7 @@ func (c *ctxt7) stacksplit(p *obj.Prog, framesize int32) *obj.Prog {
 		p.From.Type = obj.TYPE_REG
 		p.From.Reg = REGRT1
 		p.Reg = REGSP
-	} else if framesize <= abi.StackBig {
+	} else if framesize <= objabi.StackBig {
 		// large stack: SP-framesize < stackguard-StackSmall
 		//	SUB	$(framesize-StackSmall), SP, RT2
 		//	CMP	stackguard, RT2
@@ -187,7 +180,7 @@ func (c *ctxt7) stacksplit(p *obj.Prog, framesize int32) *obj.Prog {
 
 		p.As = ASUB
 		p.From.Type = obj.TYPE_CONST
-		p.From.Offset = int64(framesize) - abi.StackSmall
+		p.From.Offset = int64(framesize) - objabi.StackSmall
 		p.Reg = REGSP
 		p.To.Type = obj.TYPE_REG
 		p.To.Reg = REGRT2
@@ -213,7 +206,7 @@ func (c *ctxt7) stacksplit(p *obj.Prog, framesize int32) *obj.Prog {
 		p = obj.Appendp(p, c.newprog)
 		p.As = ASUBS
 		p.From.Type = obj.TYPE_CONST
-		p.From.Offset = int64(framesize) - abi.StackSmall
+		p.From.Offset = int64(framesize) - objabi.StackSmall
 		p.Reg = REGSP
 		p.To.Type = obj.TYPE_REG
 		p.To.Reg = REGRT2
@@ -308,12 +301,17 @@ func progedit(ctxt *obj.Link, p *obj.Prog, newprog obj.ProgAlloc) {
 	p.From.Class = 0
 	p.To.Class = 0
 
-	// Previously we rewrote $0 to ZR, but we have now removed this change.
-	// In order to be compatible with some previous legal instruction formats,
-	// reserve the previous conversion for some specific instructions.
-	if p.From.Type == obj.TYPE_CONST && p.From.Offset == 0 && zrReplace[p.As] {
+	// $0 results in C_ZCON, which matches both C_REG and various
+	// C_xCON, however the C_REG cases in asmout don't expect a
+	// constant, so they will use the register fields and assemble
+	// a R0. To prevent that, rewrite $0 as ZR.
+	if p.From.Type == obj.TYPE_CONST && p.From.Offset == 0 {
 		p.From.Type = obj.TYPE_REG
 		p.From.Reg = REGZERO
+	}
+	if p.To.Type == obj.TYPE_CONST && p.To.Offset == 0 && !noZRreplace[p.As] {
+		p.To.Type = obj.TYPE_REG
+		p.To.Reg = REGZERO
 	}
 
 	// Rewrite BR/BL to symbol as TYPE_BRANCH.
@@ -367,6 +365,21 @@ func progedit(ctxt *obj.Link, p *obj.Prog, newprog obj.ProgAlloc) {
 		}
 
 		break
+	}
+
+	// Rewrite negative immediates as positive immediates with
+	// complementary instruction.
+	switch p.As {
+	case AADD, ASUB, ACMP, ACMN:
+		if p.From.Type == obj.TYPE_CONST && p.From.Offset < 0 && p.From.Offset != -1<<63 {
+			p.From.Offset = -p.From.Offset
+			p.As = complements[p.As]
+		}
+	case AADDW, ASUBW, ACMPW, ACMNW:
+		if p.From.Type == obj.TYPE_CONST && p.From.Offset < 0 && int32(p.From.Offset) != -1<<31 {
+			p.From.Offset = -p.From.Offset
+			p.As = complements[p.As]
+		}
 	}
 
 	if c.ctxt.Flag_dynlink {
@@ -583,7 +596,7 @@ func preprocess(ctxt *obj.Link, cursym *obj.LSym, newprog obj.ProgAlloc) {
 				}
 			}
 
-			if p.Mark&LEAF != 0 && c.autosize < abi.StackSmall {
+			if p.Mark&LEAF != 0 && c.autosize < objabi.StackSmall {
 				// A leaf function with a small stack can be marked
 				// NOSPLIT, avoiding a stack check.
 				p.From.Sym.Set(obj.AttrNoSplit, true)
@@ -1038,8 +1051,8 @@ func preprocess(ctxt *obj.Link, cursym *obj.LSym, newprog obj.ProgAlloc) {
 
 		if p.To.Type == obj.TYPE_REG && p.To.Reg == REGSP && p.Spadj == 0 {
 			f := c.cursym.Func()
-			if f.FuncFlag&abi.FuncFlagSPWrite == 0 {
-				c.cursym.Func().FuncFlag |= abi.FuncFlagSPWrite
+			if f.FuncFlag&objabi.FuncFlag_SPWRITE == 0 {
+				c.cursym.Func().FuncFlag |= objabi.FuncFlag_SPWRITE
 				if ctxt.Debugvlog || !ctxt.IsAsm {
 					ctxt.Logf("auto-SPWRITE: %s %v\n", c.cursym.Name, p)
 					if !ctxt.IsAsm {

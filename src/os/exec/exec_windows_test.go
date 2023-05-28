@@ -8,7 +8,6 @@ package exec_test
 
 import (
 	"fmt"
-	"internal/testenv"
 	"io"
 	"os"
 	"os/exec"
@@ -16,11 +15,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-)
-
-var (
-	quitSignal os.Signal = nil
-	pipeSignal os.Signal = syscall.SIGPIPE
 )
 
 func init() {
@@ -39,8 +33,6 @@ func cmdPipeHandle(args ...string) {
 }
 
 func TestPipePassing(t *testing.T) {
-	t.Parallel()
-
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Error(err)
@@ -68,9 +60,7 @@ func TestPipePassing(t *testing.T) {
 }
 
 func TestNoInheritHandles(t *testing.T) {
-	t.Parallel()
-
-	cmd := testenv.Command(t, "cmd", "/c exit 88")
+	cmd := exec.Command("cmd", "/c exit 88")
 	cmd.SysProcAttr = &syscall.SysProcAttr{NoInheritHandles: true}
 	err := cmd.Run()
 	exitError, ok := err.(*exec.ExitError)
@@ -86,7 +76,6 @@ func TestNoInheritHandles(t *testing.T) {
 // with a copy of the parent's SYSTEMROOT.
 // (See issue 25210.)
 func TestChildCriticalEnv(t *testing.T) {
-	t.Parallel()
 	cmd := helperCommand(t, "echoenv", "SYSTEMROOT")
 
 	// Explicitly remove SYSTEMROOT from the command's environment.

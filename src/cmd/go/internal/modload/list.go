@@ -17,11 +17,9 @@ import (
 
 	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
-	"cmd/go/internal/gover"
 	"cmd/go/internal/modfetch/codehost"
 	"cmd/go/internal/modinfo"
 	"cmd/go/internal/search"
-	"cmd/internal/pkgpattern"
 
 	"golang.org/x/mod/module"
 )
@@ -121,9 +119,6 @@ func listModules(ctx context.Context, rs *Requirements, args []string, mode List
 	if len(args) == 0 {
 		var ms []*modinfo.ModulePublic
 		for _, m := range MainModules.Versions() {
-			if gover.IsToolchain(m.Path) {
-				continue
-			}
 			ms = append(ms, moduleInfo(ctx, rs, m, mode, reuse))
 		}
 		return rs, ms, nil
@@ -144,7 +139,9 @@ func listModules(ctx context.Context, rs *Requirements, args []string, mode List
 			}
 			continue
 		}
-		if path, vers, found := strings.Cut(arg, "@"); found {
+		if i := strings.Index(arg, "@"); i >= 0 {
+			path := arg[:i]
+			vers := arg[i+1:]
 			if vers == "upgrade" || vers == "patch" {
 				if _, ok := rs.rootSelected(path); !ok || rs.pruning == unpruned {
 					needFullGraph = true
@@ -170,7 +167,10 @@ func listModules(ctx context.Context, rs *Requirements, args []string, mode List
 
 	matchedModule := map[module.Version]bool{}
 	for _, arg := range args {
-		if path, vers, found := strings.Cut(arg, "@"); found {
+		if i := strings.Index(arg, "@"); i >= 0 {
+			path := arg[:i]
+			vers := arg[i+1:]
+
 			var current string
 			if mg == nil {
 				current, _ = rs.rootSelected(path)
@@ -187,7 +187,7 @@ func listModules(ctx context.Context, rs *Requirements, args []string, mode List
 			}
 
 			allowed := CheckAllowed
-			if IsRevisionQuery(path, vers) || mode&ListRetracted != 0 {
+			if IsRevisionQuery(vers) || mode&ListRetracted != 0 {
 				// Allow excluded and retracted versions if the user asked for a
 				// specific revision or used 'go list -retracted'.
 				allowed = nil
@@ -223,10 +223,9 @@ func listModules(ctx context.Context, rs *Requirements, args []string, mode List
 		// Module path or pattern.
 		var match func(string) bool
 		if arg == "all" {
-			match = func(p string) bool { return !gover.IsToolchain(p) }
+			match = func(string) bool { return true }
 		} else if strings.Contains(arg, "...") {
-			mp := pkgpattern.MatchPattern(arg)
-			match = func(p string) bool { return mp(p) && !gover.IsToolchain(p) }
+			match = search.MatchPattern(arg)
 		} else {
 			var v string
 			if mg == nil {

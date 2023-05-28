@@ -79,7 +79,7 @@ const (
 
 const io_SeekCurrent = 1 // io.SeekCurrent (not defined in Go 1.4)
 
-// ImportData imports a package from the serialized package data
+// iImportData imports a package from the serialized package data
 // and returns the number of bytes consumed and a reference to the package.
 // If the export data version is not recognized or the format is otherwise
 // compromised, an error is returned.
@@ -139,18 +139,21 @@ func ImportData(imports map[string]*types2.Package, data, path string) (pkg *typ
 		pkgPathOff := r.uint64()
 		pkgPath := p.stringAt(pkgPathOff)
 		pkgName := p.stringAt(r.uint64())
-		_ = int(r.uint64()) // was package height, but not necessary anymore.
+		pkgHeight := int(r.uint64())
 
 		if pkgPath == "" {
 			pkgPath = path
 		}
 		pkg := imports[pkgPath]
 		if pkg == nil {
-			pkg = types2.NewPackage(pkgPath, pkgName)
+			pkg = types2.NewPackageHeight(pkgPath, pkgName, pkgHeight)
 			imports[pkgPath] = pkg
 		} else {
 			if pkg.Name() != pkgName {
 				errorf("conflicting names %s and %s for package %q", pkg.Name(), pkgName, path)
+			}
+			if pkg.Height() != pkgHeight {
+				errorf("conflicting heights %v and %v for package %q", pkg.Height(), pkgHeight, path)
 			}
 		}
 
@@ -233,7 +236,10 @@ func (p *iimporter) doDecl(pkg *types2.Package, name string) {
 	}
 
 	r := &importReader{p: p, currPkg: pkg}
-	r.declReader.Reset(p.declData[off:])
+	// Reader.Reset is not available in Go 1.4.
+	// Use bytes.NewReader for now.
+	// r.declReader.Reset(p.declData[off:])
+	r.declReader = *strings.NewReader(p.declData[off:])
 
 	r.obj(name)
 }
@@ -279,7 +285,10 @@ func (p *iimporter) typAt(off uint64, base *types2.Named) types2.Type {
 	}
 
 	r := &importReader{p: p}
-	r.declReader.Reset(p.declData[off-predeclReserved:])
+	// Reader.Reset is not available in Go 1.4.
+	// Use bytes.NewReader for now.
+	// r.declReader.Reset(p.declData[off-predeclReserved:])
+	r.declReader = *strings.NewReader(p.declData[off-predeclReserved:])
 	t := r.doType(base)
 
 	if canReuse(base, t) {

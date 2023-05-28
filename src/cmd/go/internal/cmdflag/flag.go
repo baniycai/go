@@ -70,7 +70,14 @@ func ParseOne(fs *flag.FlagSet, args []string) (f *flag.Flag, remainingArgs []st
 		return nil, args, NonFlagError{RawArg: raw}
 	}
 
-	name, value, hasValue := strings.Cut(arg[1:], "=")
+	name := arg[1:]
+	hasValue := false
+	value := ""
+	if i := strings.Index(name, "="); i >= 0 {
+		value = name[i+1:]
+		hasValue = true
+		name = name[0:i]
+	}
 
 	f = fs.Lookup(name)
 	if f == nil {

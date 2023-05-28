@@ -10,14 +10,19 @@ import (
 	"io"
 
 	"cmd/compile/internal/base"
+	"cmd/compile/internal/typecheck"
 	"cmd/internal/bio"
 )
 
 func WriteExports(out *bio.Writer) {
 	var data bytes.Buffer
 
-	data.WriteByte('u')
-	writeUnifiedExport(&data)
+	if base.Debug.Unified != 0 {
+		data.WriteByte('u')
+		writeUnifiedExport(&data)
+	} else {
+		typecheck.WriteExports(&data, true)
+	}
 
 	// The linker also looks for the $$ marker - use char after $$ to distinguish format.
 	out.WriteString("\n$$B\n") // indicate binary export format

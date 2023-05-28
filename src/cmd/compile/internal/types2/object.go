@@ -189,7 +189,7 @@ func (obj *object) sameId(pkg *Package, name string) bool {
 //
 // Objects are ordered nil before non-nil, exported before
 // non-exported, then by name, and finally (for non-exported
-// functions) by package path.
+// functions) by package height and path.
 func (a *object) less(b *object) bool {
 	if a == b {
 		return false
@@ -215,6 +215,9 @@ func (a *object) less(b *object) bool {
 		return a.name < b.name
 	}
 	if !ea {
+		if a.pkg.height != b.pkg.height {
+			return a.pkg.height < b.pkg.height
+		}
 		return a.pkg.path < b.pkg.path
 	}
 
@@ -512,7 +515,7 @@ func writeObject(buf *bytes.Buffer, obj Object, qf Qualifier) {
 
 	// For package-level objects, qualify the name.
 	if obj.Pkg() != nil && obj.Pkg().scope.Lookup(obj.Name()) == obj {
-		buf.WriteString(packagePrefix(obj.Pkg(), qf))
+		writePackage(buf, obj.Pkg(), qf)
 	}
 	buf.WriteString(obj.Name())
 
@@ -553,9 +556,9 @@ func writeObject(buf *bytes.Buffer, obj Object, qf Qualifier) {
 	WriteType(buf, typ, qf)
 }
 
-func packagePrefix(pkg *Package, qf Qualifier) string {
+func writePackage(buf *bytes.Buffer, pkg *Package, qf Qualifier) {
 	if pkg == nil {
-		return ""
+		return
 	}
 	var s string
 	if qf != nil {
@@ -564,9 +567,9 @@ func packagePrefix(pkg *Package, qf Qualifier) string {
 		s = pkg.Path()
 	}
 	if s != "" {
-		s += "."
+		buf.WriteString(s)
+		buf.WriteByte('.')
 	}
-	return s
 }
 
 // ObjectString returns the string form of obj.
@@ -604,7 +607,7 @@ func writeFuncName(buf *bytes.Buffer, f *Func, qf Qualifier) {
 			buf.WriteByte(')')
 			buf.WriteByte('.')
 		} else if f.pkg != nil {
-			buf.WriteString(packagePrefix(f.pkg, qf))
+			writePackage(buf, f.pkg, qf)
 		}
 	}
 	buf.WriteString(f.name)

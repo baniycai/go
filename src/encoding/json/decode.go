@@ -540,10 +540,17 @@ func (d *decodeState) array(v reflect.Value) error {
 			break
 		}
 
-		// Expand slice length, growing the slice if necessary.
+		// Get element of array, growing if necessary.
 		if v.Kind() == reflect.Slice {
+			// Grow slice if necessary
 			if i >= v.Cap() {
-				v.Grow(1)
+				newcap := v.Cap() + v.Cap()/2
+				if newcap < 4 {
+					newcap = 4
+				}
+				newv := reflect.MakeSlice(v.Type(), v.Len(), newcap)
+				reflect.Copy(newv, v)
+				v.Set(newv)
 			}
 			if i >= v.Len() {
 				v.SetLen(i + 1)
@@ -577,11 +584,13 @@ func (d *decodeState) array(v reflect.Value) error {
 
 	if i < v.Len() {
 		if v.Kind() == reflect.Array {
+			// Array. Zero the rest.
+			z := reflect.Zero(v.Type().Elem())
 			for ; i < v.Len(); i++ {
-				v.Index(i).SetZero() // zero remainder of array
+				v.Index(i).Set(z)
 			}
 		} else {
-			v.SetLen(i) // truncate the slice
+			v.SetLen(i)
 		}
 	}
 	if i == 0 && v.Kind() == reflect.Slice {
@@ -686,13 +695,24 @@ func (d *decodeState) object(v reflect.Value) error {
 			if !mapElem.IsValid() {
 				mapElem = reflect.New(elemType).Elem()
 			} else {
-				mapElem.SetZero()
+				mapElem.Set(reflect.Zero(elemType))
 			}
 			subv = mapElem
 		} else {
-			f := fields.byExactName[string(key)]
-			if f == nil {
-				f = fields.byFoldedName[string(foldName(key))]
+			var f *field
+			if i, ok := fields.nameIndex[string(key)]; ok {
+				// Found an exact name match.
+				f = &fields.list[i]
+			} else {
+				// Fall back to the expensive case-insensitive
+				// linear search.
+				for i := range fields.list {
+					ff := &fields.list[i]
+					if ff.equalFold(ff.nameBytes, key) {
+						f = ff
+						break
+					}
+				}
 			}
 			if f != nil {
 				subv = v
@@ -889,7 +909,7 @@ func (d *decodeState) literalStore(item []byte, v reflect.Value, fromQuoted bool
 		}
 		switch v.Kind() {
 		case reflect.Interface, reflect.Pointer, reflect.Map, reflect.Slice:
-			v.SetZero()
+			v.Set(reflect.Zero(v.Type()))
 			// otherwise, ignore null for primitives/string
 		}
 	case 't', 'f': // true, false

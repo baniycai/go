@@ -1,6 +1,6 @@
 env GO111MODULE=off
 
-[!compiler:gc] skip 'using -gcflags and -ldflags'
+[!gc] skip 'using -gcflags and -ldflags'
 [short] skip
 
 env GOCACHE=$WORK/gocache  # Looking for compile commands, so need a clean cache.

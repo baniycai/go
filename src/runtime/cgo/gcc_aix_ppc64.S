@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-.file "gcc_aix_ppc64.S"
+// +build ppc64
+// +build aix
 
 /*
  * void crosscall_ppc64(void (*fn)(void), void *g)

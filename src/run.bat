@@ -18,7 +18,6 @@ setlocal
 
 set GOBUILDFAIL=0
 
-set GOENV=off
 ..\bin\go tool dist env > env.bat
 if errorlevel 1 goto fail
 call .\env.bat

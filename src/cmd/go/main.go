@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:generate go test cmd/go -v -run=TestDocsUpToDate -fixdocs
+//go:generate ./mkalldocs.sh
 
 package main
 
@@ -16,7 +16,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	rtrace "runtime/trace"
 	"strings"
 
 	"cmd/go/internal/base"
@@ -87,14 +86,11 @@ func init() {
 	}
 }
 
-var _ = go11tag
-
 func main() {
-	log.SetFlags(0)
-	switchGoToolchain()
-
+	_ = go11tag
 	flag.Usage = base.Usage
 	flag.Parse()
+	log.SetFlags(0)
 
 	args := flag.Args()
 	if len(args) < 1 {
@@ -224,20 +220,6 @@ func invoke(cmd *base.Command, args []string) {
 		cmd.Flag.Parse(args[1:])
 		args = cmd.Flag.Args()
 	}
-
-	if cfg.DebugRuntimeTrace != "" {
-		f, err := os.Create(cfg.DebugRuntimeTrace)
-		if err != nil {
-			base.Fatalf("creating trace file: %v", err)
-		}
-		if err := rtrace.Start(f); err != nil {
-			base.Fatalf("starting event trace: %v", err)
-		}
-		defer func() {
-			rtrace.Stop()
-		}()
-	}
-
 	ctx := maybeStartTrace(context.Background())
 	ctx, span := trace.StartSpan(ctx, fmt.Sprint("Running ", cmd.Name(), " command"))
 	cmd.Run(ctx, cmd, args)

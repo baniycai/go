@@ -10,6 +10,6 @@ package main
 
 import "unsafe"
 
-var x struct { // GC_ERROR "initialization cycle: x refers to itself"
+var x struct { // GC_ERROR "initialization loop for x"
 	c [unsafe.Alignof(x.c)]int // GCCGO_ERROR "array bound|typechecking loop|invalid array"
 }

@@ -1,5 +1,5 @@
-[!net:golang.org] skip
-[!git] skip
+[!net] skip
+[!exec:git] skip
 
 env GOBIN=$WORK/tmp/gobin
 env GO111MODULE=off

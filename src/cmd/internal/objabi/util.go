@@ -22,12 +22,5 @@ const (
 // or link object files that are incompatible with each other. This
 // string always starts with "go object ".
 func HeaderString() string {
-	archExtra := ""
-	if k, v := buildcfg.GOGOARCH(); k != "" && v != "" {
-		archExtra = " " + k + "=" + v
-	}
-	return fmt.Sprintf("go object %s %s %s%s X:%s\n",
-		buildcfg.GOOS, buildcfg.GOARCH,
-		buildcfg.Version, archExtra,
-		strings.Join(buildcfg.Experiment.Enabled(), ","))
+	return fmt.Sprintf("go object %s %s %s X:%s\n", buildcfg.GOOS, buildcfg.GOARCH, buildcfg.Version, strings.Join(buildcfg.Experiment.Enabled(), ","))
 }

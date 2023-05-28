@@ -1,7 +1,3 @@
-// Copyright 2018 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 package ssa_test
 
 import (
@@ -12,7 +8,6 @@ import (
 	"debug/macho"
 	"debug/pe"
 	"fmt"
-	"internal/platform"
 	"internal/testenv"
 	"internal/xcoff"
 	"io"
@@ -54,8 +49,8 @@ type Line struct {
 }
 
 func TestStmtLines(t *testing.T) {
-	if !platform.ExecutableHasDWARF(runtime.GOOS, runtime.GOARCH) {
-		t.Skipf("skipping on %s/%s: no DWARF symbol table in executables", runtime.GOOS, runtime.GOARCH)
+	if runtime.GOOS == "plan9" {
+		t.Skip("skipping on plan9; no DWARF symbol table in executables")
 	}
 
 	if runtime.GOOS == "aix" {
@@ -76,15 +71,8 @@ func TestStmtLines(t *testing.T) {
 		}
 	}
 
-	// Build cmd/go forcing DWARF enabled, as a large test case.
-	dir := t.TempDir()
-	out, err := testenv.Command(t, testenv.GoToolPath(t), "build", "-ldflags=-w=0", "-o", dir+"/test.exe", "cmd/go").CombinedOutput()
-	if err != nil {
-		t.Fatalf("go build: %v\n%s", err, out)
-	}
-
 	lines := map[Line]bool{}
-	dw, err := open(dir + "/test.exe")
+	dw, err := open(testenv.GoToolPath(t))
 	must(err)
 	rdr := dw.Reader()
 	rdr.Seek(0)

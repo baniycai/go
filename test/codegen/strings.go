@@ -14,13 +14,8 @@ func CountRunes(s string) int { // Issue #24923
 	return len([]rune(s))
 }
 
-func CountBytes(s []byte) int {
-	// amd64:-`.*runtime.slicebytetostring`
-	return len(string(s))
-}
-
 func ToByteSlice() []byte { // Issue #24698
-	// amd64:`LEAQ\ttype:\[3\]uint8`
+	// amd64:`LEAQ\ttype\.\[3\]uint8`
 	// amd64:`CALL\truntime\.newobject`
 	// amd64:-`.*runtime.stringtoslicebyte`
 	return []byte("foo")
@@ -50,7 +45,7 @@ func ConstantLoad() {
 	// 7306073769690871863 = 0x6564636261393837
 	// amd64:`MOVQ\t\$3978425819141910832`,`MOVQ\t\$7306073769690871863`
 	//   386:`MOVL\t\$858927408, \(`,`DUFFCOPY`
-	// arm64:`MOVD\t\$3978425819141910832`,`MOVD\t\$7306073769690871863`,`MOVD\t\$15`
+	// arm64:`MOVD\t\$3978425819141910832`,`MOVD\t\$1650538808`,`MOVD\t\$25699`,`MOVD\t\$101`
 	//  wasm:`I64Const\t\$3978425819141910832`,`I64Store\t\$0`,`I64Const\t\$7306073769690871863`,`I64Store\t\$7`
 	bsink = []byte("0123456789abcde")
 

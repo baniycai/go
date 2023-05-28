@@ -1,7 +1,6 @@
 env GO111MODULE=on
 
-[!net:golang.org] skip
-[!net:proxy.golang.org] skip
+[!net] skip
 
 env GOPROXY=https://proxy.golang.org,direct
 env GOSUMDB=off

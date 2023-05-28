@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build unix || windows
+// +build cgo
+// +build aix darwin dragonfly freebsd linux netbsd openbsd solaris windows
 
 #include "libcgo.h"
 

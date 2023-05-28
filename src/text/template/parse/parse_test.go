@@ -391,36 +391,6 @@ func TestParseWithComments(t *testing.T) {
 	}
 }
 
-func TestKeywordsAndFuncs(t *testing.T) {
-	// Check collisions between functions and new keywords like 'break'. When a
-	// break function is provided, the parser should treat 'break' as a function,
-	// not a keyword.
-	textFormat = "%q"
-	defer func() { textFormat = "%s" }()
-
-	inp := `{{range .X}}{{break 20}}{{end}}`
-	{
-		// 'break' is a defined function, don't treat it as a keyword: it should
-		// accept an argument successfully.
-		var funcsWithKeywordFunc = map[string]any{
-			"break": func(in any) any { return in },
-		}
-		tmpl, err := New("").Parse(inp, "", "", make(map[string]*Tree), funcsWithKeywordFunc)
-		if err != nil || tmpl == nil {
-			t.Errorf("with break func: unexpected error: %v", err)
-		}
-	}
-
-	{
-		// No function called 'break'; treat it as a keyword. Results in a parse
-		// error.
-		tmpl, err := New("").Parse(inp, "", "", make(map[string]*Tree), make(map[string]any))
-		if err == nil || tmpl != nil {
-			t.Errorf("without break func: expected error; got none")
-		}
-	}
-}
-
 func TestSkipFuncCheck(t *testing.T) {
 	oldTextFormat := textFormat
 	textFormat = "%q"
@@ -519,7 +489,7 @@ var errorTests = []parseTest{
 		hasError, `unclosed left paren`},
 	{"rparen",
 		"{{.X 1 2 3 ) }}",
-		hasError, "unexpected right paren"},
+		hasError, `unexpected ")" in command`},
 	{"rparen2",
 		"{{(.X 1 2 3",
 		hasError, `unclosed action`},
@@ -627,8 +597,7 @@ func TestBlock(t *testing.T) {
 }
 
 func TestLineNum(t *testing.T) {
-	// const count = 100
-	const count = 3
+	const count = 100
 	text := strings.Repeat("{{printf 1234}}\n", count)
 	tree, err := New("bench").Parse(text, "", "", make(map[string]*Tree), builtins)
 	if err != nil {
@@ -642,11 +611,11 @@ func TestLineNum(t *testing.T) {
 		// Action first.
 		action := nodes[i].(*ActionNode)
 		if action.Line != line {
-			t.Errorf("line %d: action is line %d", line, action.Line)
+			t.Fatalf("line %d: action is line %d", line, action.Line)
 		}
 		pipe := action.Pipe
 		if pipe.Line != line {
-			t.Errorf("line %d: pipe is line %d", line, pipe.Line)
+			t.Fatalf("line %d: pipe is line %d", line, pipe.Line)
 		}
 	}
 }

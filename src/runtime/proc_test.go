@@ -415,10 +415,7 @@ func TestNumGoroutine(t *testing.T) {
 		n := runtime.NumGoroutine()
 		buf = buf[:runtime.Stack(buf, true)]
 
-		// To avoid double-counting "goroutine" in "goroutine $m [running]:"
-		// and "created by $func in goroutine $n", remove the latter
-		output := strings.ReplaceAll(string(buf), "in goroutine", "")
-		nstk := strings.Count(output, "goroutine ")
+		nstk := strings.Count(string(buf), "goroutine ")
 		if n == nstk {
 			break
 		}

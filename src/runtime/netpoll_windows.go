@@ -26,7 +26,7 @@ type net_op struct {
 }
 
 type overlappedEntry struct {
-	key      *pollDesc
+	key      uintptr
 	op       *net_op // In reality it's *overlapped, but we cast it to *net_op anyway.
 	internal uintptr
 	qty      uint32
@@ -35,7 +35,7 @@ type overlappedEntry struct {
 var (
 	iocphandle uintptr = _INVALID_HANDLE_VALUE // completion port io handle
 
-	netpollWakeSig atomic.Uint32 // used to avoid duplicate calls of netpollBreak
+	netpollWakeSig uint32 // used to avoid duplicate calls of netpollBreak
 )
 
 func netpollinit() {
@@ -51,8 +51,7 @@ func netpollIsPollDescriptor(fd uintptr) bool {
 }
 
 func netpollopen(fd uintptr, pd *pollDesc) int32 {
-	// TODO(iant): Consider using taggedPointer on 64-bit systems.
-	if stdcall4(_CreateIoCompletionPort, fd, iocphandle, uintptr(unsafe.Pointer(pd)), 0) == 0 {
+	if stdcall4(_CreateIoCompletionPort, fd, iocphandle, 0, 0) == 0 {
 		return int32(getlasterror())
 	}
 	return 0
@@ -68,14 +67,11 @@ func netpollarm(pd *pollDesc, mode int) {
 }
 
 func netpollBreak() {
-	// Failing to cas indicates there is an in-flight wakeup, so we're done here.
-	if !netpollWakeSig.CompareAndSwap(0, 1) {
-		return
-	}
-
-	if stdcall4(_PostQueuedCompletionStatus, iocphandle, 0, 0, 0) == 0 {
-		println("runtime: netpoll: PostQueuedCompletionStatus failed (errno=", getlasterror(), ")")
-		throw("runtime: netpoll: PostQueuedCompletionStatus failed")
+	if atomic.Cas(&netpollWakeSig, 0, 1) {
+		if stdcall4(_PostQueuedCompletionStatus, iocphandle, 0, 0, 0) == 0 {
+			println("runtime: netpoll: PostQueuedCompletionStatus failed (errno=", getlasterror(), ")")
+			throw("runtime: netpoll: PostQueuedCompletionStatus failed")
+		}
 	}
 }
 
@@ -129,7 +125,7 @@ func netpoll(delay int64) gList {
 	mp.blocked = false
 	for i = 0; i < n; i++ {
 		op = entries[i].op
-		if op != nil && op.pd == entries[i].key {
+		if op != nil {
 			errno = 0
 			qty = 0
 			if stdcall5(_WSAGetOverlappedResult, op.pd.fd, uintptr(unsafe.Pointer(op)), uintptr(unsafe.Pointer(&qty)), 0, uintptr(unsafe.Pointer(&flags))) == 0 {
@@ -137,7 +133,7 @@ func netpoll(delay int64) gList {
 			}
 			handlecompletion(&toRun, op, errno, qty)
 		} else {
-			netpollWakeSig.Store(0)
+			atomic.Store(&netpollWakeSig, 0)
 			if delay == 0 {
 				// Forward the notification to the
 				// blocked poller.

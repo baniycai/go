@@ -11,15 +11,8 @@ LONG WINAPI customExceptionHandlder(struct _EXCEPTION_POINTERS *ExceptionInfo)
         exceptionCount++;
         // prepare context to resume execution
         CONTEXT *c = ExceptionInfo->ContextRecord;
-#ifdef _AMD64_
-        c->Rip = *(DWORD64 *)c->Rsp;
+        c->Rip = *(ULONG_PTR *)c->Rsp;
         c->Rsp += 8;
-#elif defined(_X86_)
-        c->Eip = *(DWORD *)c->Esp;
-        c->Esp += 4;
-#else
-        c->Pc = c->Lr;
-#endif
         return EXCEPTION_CONTINUE_EXECUTION;
     }
     return EXCEPTION_CONTINUE_SEARCH;

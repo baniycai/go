@@ -10,7 +10,6 @@ import (
 	"cmd/internal/objfile"
 	"cmd/internal/quoted"
 	"debug/dwarf"
-	"internal/platform"
 	"internal/testenv"
 	"os"
 	"os/exec"
@@ -55,8 +54,8 @@ func testDWARF(t *testing.T, buildmode string, expectDWARF bool, env ...string) 
 	testenv.MustHaveCGO(t)
 	testenv.MustHaveGoBuild(t)
 
-	if !platform.ExecutableHasDWARF(runtime.GOOS, runtime.GOARCH) {
-		t.Skipf("skipping on %s/%s: no DWARF symbol table in executables", runtime.GOOS, runtime.GOARCH)
+	if runtime.GOOS == "plan9" {
+		t.Skip("skipping on plan9; no DWARF symbol table in executables")
 	}
 
 	t.Parallel()
@@ -86,7 +85,7 @@ func testDWARF(t *testing.T, buildmode string, expectDWARF bool, env ...string) 
 
 			exe := filepath.Join(tmpDir, prog+".exe")
 			dir := "../../runtime/testdata/" + prog
-			cmd := testenv.Command(t, testenv.GoToolPath(t), "build", "-toolexec", os.Args[0], "-o", exe)
+			cmd := exec.Command(testenv.GoToolPath(t), "build", "-toolexec", os.Args[0], "-o", exe)
 			if buildmode != "" {
 				cmd.Args = append(cmd.Args, "-buildmode", buildmode)
 			}
@@ -101,7 +100,7 @@ func testDWARF(t *testing.T, buildmode string, expectDWARF bool, env ...string) 
 
 			if buildmode == "c-archive" {
 				// Extract the archive and use the go.o object within.
-				cmd := testenv.Command(t, "ar", "-x", exe)
+				cmd := exec.Command("ar", "-x", exe)
 				cmd.Dir = tmpDir
 				if out, err := cmd.CombinedOutput(); err != nil {
 					t.Fatalf("ar -x %s: %v\n%s", exe, err, out)
@@ -113,7 +112,7 @@ func testDWARF(t *testing.T, buildmode string, expectDWARF bool, env ...string) 
 			if runtime.GOOS == "darwin" && !darwinSymbolTestIsTooFlaky {
 				if _, err = exec.LookPath("symbols"); err == nil {
 					// Ensure Apple's tooling can parse our object for symbols.
-					out, err = testenv.Command(t, "symbols", exe).CombinedOutput()
+					out, err = exec.Command("symbols", exe).CombinedOutput()
 					if err != nil {
 						t.Fatalf("symbols %v: %v: %s", filepath.Base(exe), err, out)
 					} else {
@@ -193,9 +192,6 @@ func TestDWARF(t *testing.T) {
 		if runtime.GOOS == "windows" {
 			t.Skip("skipping Windows/c-archive; see Issue 35512 for more.")
 		}
-		if !platform.BuildModeSupported(runtime.Compiler, "c-archive", runtime.GOOS, runtime.GOARCH) {
-			t.Skipf("skipping c-archive test on unsupported platform %s-%s", runtime.GOOS, runtime.GOARCH)
-		}
 		t.Run("c-archive", func(t *testing.T) {
 			testDWARF(t, "c-archive", true)
 		})
@@ -212,12 +208,12 @@ func TestDWARFiOS(t *testing.T) {
 	if runtime.GOARCH != "amd64" || runtime.GOOS != "darwin" {
 		t.Skip("skipping on non-darwin/amd64 platform")
 	}
-	if err := testenv.Command(t, "xcrun", "--help").Run(); err != nil {
+	if err := exec.Command("xcrun", "--help").Run(); err != nil {
 		t.Skipf("error running xcrun, required for iOS cross build: %v", err)
 	}
 	// Check to see if the ios tools are installed. It's possible to have the command line tools
 	// installed without the iOS sdk.
-	if output, err := testenv.Command(t, "xcodebuild", "-showsdks").CombinedOutput(); err != nil {
+	if output, err := exec.Command("xcodebuild", "-showsdks").CombinedOutput(); err != nil {
 		t.Skipf("error running xcodebuild, required for iOS cross build: %v", err)
 	} else if !strings.Contains(string(output), "iOS SDK") {
 		t.Skipf("iOS SDK not detected.")

@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"runtime"
 	"strconv"
 	"strings"
 )
@@ -284,8 +283,7 @@ func (d *Decoder) unmarshalAttr(val reflect.Value, attr Attr) error {
 		// Slice of element values.
 		// Grow slice.
 		n := val.Len()
-		val.Grow(1)
-		val.SetLen(n + 1)
+		val.Set(reflect.Append(val, reflect.Zero(val.Type().Elem())))
 
 		// Recur to read element into slice.
 		if err := d.unmarshalAttr(val.Index(n), attr); err != nil {
@@ -310,17 +308,14 @@ var (
 	textUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
 )
 
-const (
-	maxUnmarshalDepth     = 10000
-	maxUnmarshalDepthWasm = 5000 // go.dev/issue/56498
-)
+const maxUnmarshalDepth = 10000
 
-var errUnmarshalDepth = errors.New("exceeded max depth")
+var errExeceededMaxUnmarshalDepth = errors.New("exceeded max depth")
 
 // Unmarshal a single XML element into val.
 func (d *Decoder) unmarshal(val reflect.Value, start *StartElement, depth int) error {
-	if depth >= maxUnmarshalDepth || runtime.GOARCH == "wasm" && depth >= maxUnmarshalDepthWasm {
-		return errUnmarshalDepth
+	if depth >= maxUnmarshalDepth {
+		return errExeceededMaxUnmarshalDepth
 	}
 	// Find start element if we need it.
 	if start == nil {
@@ -411,8 +406,7 @@ func (d *Decoder) unmarshal(val reflect.Value, start *StartElement, depth int) e
 		// Slice of element values.
 		// Grow slice.
 		n := v.Len()
-		v.Grow(1)
-		v.SetLen(n + 1)
+		v.Set(reflect.Append(val, reflect.Zero(v.Type().Elem())))
 
 		// Recur to read element into slice.
 		if err := d.unmarshal(v.Index(n), start, depth+1); err != nil {
@@ -539,7 +533,7 @@ Loop:
 			consumed := false
 			if sv.IsValid() {
 				// unmarshalPath can call unmarshal, so we need to pass the depth through so that
-				// we can continue to enforce the maximum recursion limit.
+				// we can continue to enforce the maximum recusion limit.
 				consumed, err = d.unmarshalPath(tinfo, sv, nil, &t, depth)
 				if err != nil {
 					return err

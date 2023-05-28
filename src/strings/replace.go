@@ -455,30 +455,21 @@ func (r *byteReplacer) Replace(s string) string {
 }
 
 func (r *byteReplacer) WriteString(w io.Writer, s string) (n int, err error) {
-	sw := getStringWriter(w)
-	last := 0
-	for i := 0; i < len(s); i++ {
-		b := s[i]
-		if r[b] == b {
-			continue
-		}
-		if last != i {
-			wn, err := sw.WriteString(s[last:i])
-			n += wn
-			if err != nil {
-				return n, err
-			}
-		}
-		last = i + 1
-		nw, err := w.Write(r[b : int(b)+1])
-		n += nw
-		if err != nil {
-			return n, err
-		}
+	// TODO(bradfitz): use io.WriteString with slices of s, avoiding allocation.
+	bufsize := 32 << 10
+	if len(s) < bufsize {
+		bufsize = len(s)
 	}
-	if last != len(s) {
-		nw, err := sw.WriteString(s[last:])
-		n += nw
+	buf := make([]byte, bufsize)
+
+	for len(s) > 0 {
+		ncopy := copy(buf, s)
+		s = s[ncopy:]
+		for i, b := range buf[:ncopy] {
+			buf[i] = r[b]
+		}
+		wn, err := w.Write(buf[:ncopy])
+		n += wn
 		if err != nil {
 			return n, err
 		}

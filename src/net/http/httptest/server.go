@@ -13,9 +13,9 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"net/http"
-	"net/http/internal/testcert"
 	"os"
+	"std/net/http"
+	"std/net/http/internal/testcert"
 	"strings"
 	"sync"
 	"time"
@@ -130,7 +130,7 @@ func (s *Server) Start() {
 		s.client = &http.Client{Transport: &http.Transport{}}
 	}
 	s.URL = "http://" + s.Listener.Addr().String()
-	s.wrap()
+	s.wrap() // 添加状态改变回调
 	s.goServe()
 	if serveFlag != "" {
 		fmt.Fprintln(os.Stderr, "httptest: serving on", s.URL)
@@ -307,12 +307,13 @@ func (s *Server) goServe() {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.Config.Serve(s.Listener)
+		s.Config.Serve(s.Listener) // 其实httptestserver就是对原先的server包了一层啦
 	}()
 }
 
 // wrap installs the connection state-tracking hook to know which
 // connections are idle.
+// note 添加连接状态改变时的回调函数，主要是做状态校验，并将状态更新到conns这个map中
 func (s *Server) wrap() {
 	oldHook := s.Config.ConnState
 	s.Config.ConnState = func(c net.Conn, cs http.ConnState) {

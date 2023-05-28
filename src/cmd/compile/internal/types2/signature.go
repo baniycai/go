@@ -7,7 +7,6 @@ package types2
 import (
 	"cmd/compile/internal/syntax"
 	"fmt"
-	. "internal/types/errors"
 )
 
 // ----------------------------------------------------------------------------
@@ -136,7 +135,7 @@ func (check *Checker) funcType(sig *Signature, recvPar *syntax.Field, tparams []
 				// Also: Don't report an error via genericType since it will be reported
 				//       again when we type-check the signature.
 				// TODO(gri) maybe the receiver should be marked as invalid instead?
-				if recv, _ := check.genericType(rname, nil).(*Named); recv != nil {
+				if recv, _ := check.genericType(rname, false).(*Named); recv != nil {
 					recvTParams = recv.TypeParams().list()
 				}
 			}
@@ -154,10 +153,10 @@ func (check *Checker) funcType(sig *Signature, recvPar *syntax.Field, tparams []
 			} else if len(tparams) < len(recvTParams) {
 				// Reporting an error here is a stop-gap measure to avoid crashes in the
 				// compiler when a type parameter/argument cannot be inferred later. It
-				// may lead to follow-on errors (see issues go.dev/issue/51339, go.dev/issue/51343).
+				// may lead to follow-on errors (see issues #51339, #51343).
 				// TODO(gri) find a better solution
 				got := measure(len(tparams), "type parameter")
-				check.errorf(recvPar, BadRecv, "got %s, but receiver base type declares %d", got, len(recvTParams))
+				check.errorf(recvPar, "got %s, but receiver base type declares %d", got, len(recvTParams))
 			}
 		}
 	}
@@ -179,7 +178,6 @@ func (check *Checker) funcType(sig *Signature, recvPar *syntax.Field, tparams []
 	results, _ := check.collectParams(scope, ftyp.ResultList, false)
 	scope.Squash(func(obj, alt Object) {
 		var err error_
-		err.code = DuplicateDecl
 		err.errorf(obj, "%s redeclared in this block", obj.Name())
 		err.recordAltDecl(alt)
 		check.report(&err)
@@ -196,7 +194,7 @@ func (check *Checker) funcType(sig *Signature, recvPar *syntax.Field, tparams []
 			recv = NewParam(nopos, nil, "", Typ[Invalid]) // ignore recv below
 		default:
 			// more than one receiver
-			check.error(recvList[len(recvList)-1].Pos(), InvalidRecv, "method must have exactly one receiver")
+			check.error(recvList[len(recvList)-1].Pos(), "method must have exactly one receiver")
 			fallthrough // continue with first receiver
 		case 1:
 			recv = recvList[0]
@@ -204,7 +202,7 @@ func (check *Checker) funcType(sig *Signature, recvPar *syntax.Field, tparams []
 		sig.recv = recv
 
 		// Delay validation of receiver type as it may cause premature expansion
-		// of types the receiver type is dependent on (see issues go.dev/issue/51232, go.dev/issue/51233).
+		// of types the receiver type is dependent on (see issues #51232, #51233).
 		check.later(func() {
 			// spec: "The receiver type must be of the form T or *T where T is a type name."
 			rtyp, _ := deref(recv.typ)
@@ -219,11 +217,11 @@ func (check *Checker) funcType(sig *Signature, recvPar *syntax.Field, tparams []
 				// The receiver type may be an instantiated type referred to
 				// by an alias (which cannot have receiver parameters for now).
 				if T.TypeArgs() != nil && sig.RecvTypeParams() == nil {
-					check.errorf(recv, InvalidRecv, "cannot define new methods on instantiated type %s", rtyp)
+					check.errorf(recv, "cannot define new methods on instantiated type %s", rtyp)
 					break
 				}
 				if T.obj.pkg != check.pkg {
-					check.errorf(recv, InvalidRecv, "cannot define new methods on non-local type %s", rtyp)
+					check.errorf(recv, "cannot define new methods on non-local type %s", rtyp)
 					break
 				}
 				var cause string
@@ -241,12 +239,12 @@ func (check *Checker) funcType(sig *Signature, recvPar *syntax.Field, tparams []
 					unreachable()
 				}
 				if cause != "" {
-					check.errorf(recv, InvalidRecv, "invalid receiver type %s (%s)", rtyp, cause)
+					check.errorf(recv, "invalid receiver type %s (%s)", rtyp, cause)
 				}
 			case *Basic:
-				check.errorf(recv, InvalidRecv, "cannot define new methods on non-local type %s", rtyp)
+				check.errorf(recv, "cannot define new methods on non-local type %s", rtyp)
 			default:
-				check.errorf(recv, InvalidRecv, "invalid receiver type %s", recv.typ)
+				check.errorf(recv, "invalid receiver type %s", recv.typ)
 			}
 		}).describef(recv, "validate receiver %s", recv)
 	}
@@ -277,7 +275,7 @@ func (check *Checker) collectParams(scope *Scope, list []*syntax.Field, variadic
 				if variadicOk && i == len(list)-1 {
 					variadic = true
 				} else {
-					check.softErrorf(t, MisplacedDotDotDot, "can only use ... with final parameter in list")
+					check.softErrorf(t, "can only use ... with final parameter in list")
 					// ignore ... and continue
 				}
 			}
@@ -289,7 +287,7 @@ func (check *Checker) collectParams(scope *Scope, list []*syntax.Field, variadic
 			// named parameter
 			name := field.Name.Value
 			if name == "" {
-				check.error(field.Name, InvalidSyntaxTree, "anonymous parameter")
+				check.error(field.Name, invalidAST+"anonymous parameter")
 				// ok to continue
 			}
 			par := NewParam(field.Name.Pos(), check.pkg, name, typ)
@@ -306,7 +304,7 @@ func (check *Checker) collectParams(scope *Scope, list []*syntax.Field, variadic
 	}
 
 	if named && anonymous {
-		check.error(list[0], InvalidSyntaxTree, "list contains both named and anonymous parameters")
+		check.error(list[0], invalidAST+"list contains both named and anonymous parameters")
 		// ok to continue
 	}
 

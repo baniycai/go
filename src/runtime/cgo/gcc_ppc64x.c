@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build ppc64 || ppc64le
+// +build ppc64 ppc64le
 
 #include <pthread.h>
 #include <string.h>
@@ -61,9 +61,7 @@ threadentry(void *v)
 	ThreadStart ts;
 
 	ts = *(ThreadStart*)v;
-	_cgo_tsan_acquire();
 	free(v);
-	_cgo_tsan_release();
 
 	// Save g for this thread in C TLS
 	setg_gcc((void*)ts.g);

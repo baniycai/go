@@ -1,3 +1,5 @@
+// UNREVIEWED
+
 // Copyright 2021 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
@@ -6,7 +8,6 @@ package noder
 
 import "internal/pkgbits"
 
-// A codeStmt distinguishes among statement encodings.
 type codeStmt int
 
 func (c codeStmt) Marker() pkgbits.SyncMarker { return pkgbits.SyncStmt1 }
@@ -30,7 +31,6 @@ const (
 	stmtSelect
 )
 
-// A codeExpr distinguishes among expression encodings.
 type codeExpr int
 
 func (c codeExpr) Marker() pkgbits.SyncMarker { return pkgbits.SyncExpr }
@@ -38,14 +38,15 @@ func (c codeExpr) Value() int                 { return int(c) }
 
 // TODO(mdempsky): Split expr into addr, for lvalues.
 const (
-	exprConst  codeExpr = iota
-	exprLocal           // local variable
-	exprGlobal          // global variable or function
+	exprNone codeExpr = iota
+	exprConst
+	exprType  // type expression
+	exprLocal // local variable
+	exprName  // global variable or function
+	exprBlank
 	exprCompLit
 	exprFuncLit
-	exprFieldVal
-	exprMethodVal
-	exprMethodExpr
+	exprSelector
 	exprIndex
 	exprSlice
 	exprAssert
@@ -53,26 +54,8 @@ const (
 	exprBinaryOp
 	exprCall
 	exprConvert
-	exprNew
-	exprMake
-	exprNil
-	exprFuncInst
-	exprRecv
-	exprReshape
 )
 
-type codeAssign int
-
-func (c codeAssign) Marker() pkgbits.SyncMarker { return pkgbits.SyncAssign }
-func (c codeAssign) Value() int                 { return int(c) }
-
-const (
-	assignBlank codeAssign = iota
-	assignDef
-	assignExpr
-)
-
-// A codeDecl distinguishes among declaration encodings.
 type codeDecl int
 
 func (c codeDecl) Marker() pkgbits.SyncMarker { return pkgbits.SyncDecl }

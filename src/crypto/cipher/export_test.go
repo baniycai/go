@@ -5,5 +5,6 @@
 package cipher
 
 // Export internal functions for testing.
+var XorBytes = xorBytes
 var NewCBCGenericEncrypter = newCBCGenericEncrypter
 var NewCBCGenericDecrypter = newCBCGenericDecrypter

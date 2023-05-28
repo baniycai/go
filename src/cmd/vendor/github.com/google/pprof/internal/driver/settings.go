@@ -3,6 +3,7 @@ package driver
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -32,7 +33,7 @@ func settingsFileName() (string, error) {
 
 // readSettings reads settings from fname.
 func readSettings(fname string) (*settings, error) {
-	data, err := os.ReadFile(fname)
+	data, err := ioutil.ReadFile(fname)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &settings{}, nil
@@ -63,7 +64,7 @@ func writeSettings(fname string, settings *settings) error {
 		return fmt.Errorf("failed to create settings directory: %w", err)
 	}
 
-	if err := os.WriteFile(fname, data, 0644); err != nil {
+	if err := ioutil.WriteFile(fname, data, 0644); err != nil {
 		return fmt.Errorf("failed to write settings: %w", err)
 	}
 	return nil

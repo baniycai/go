@@ -6,7 +6,6 @@ package types2
 
 import (
 	"cmd/compile/internal/syntax"
-	. "internal/types/errors"
 )
 
 // This file implements a check to validate that a Go package doesn't
@@ -138,7 +137,6 @@ func (check *Checker) reportInstanceLoop(v int) {
 	// TODO(mdempsky): Pivot stack so we report the cycle from the top?
 
 	var err error_
-	err.code = InvalidInstanceCycle
 	obj0 := check.mono.vertices[v].obj
 	err.errorf(obj0, "instantiation cycle:")
 
@@ -284,7 +282,7 @@ func (w *monoGraph) localNamedVertex(pkg *Package, named *Named) int {
 	// parameters that it's implicitly parameterized by.
 	for scope := obj.Parent(); scope != root; scope = scope.Parent() {
 		for _, elem := range scope.elems {
-			if elem, ok := elem.(*TypeName); ok && !elem.IsAlias() && cmpPos(elem.Pos(), obj.Pos()) < 0 {
+			if elem, ok := elem.(*TypeName); ok && !elem.IsAlias() && elem.Pos().Cmp(obj.Pos()) < 0 {
 				if tpar, ok := elem.Type().(*TypeParam); ok {
 					if idx < 0 {
 						idx = len(w.vertices)

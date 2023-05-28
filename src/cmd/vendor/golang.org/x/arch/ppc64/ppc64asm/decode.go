@@ -22,12 +22,9 @@ const prefixOpcode = 1
 // The Args are stored in the same order as the instruction manual.
 //
 // Prefixed instructions are stored as:
-//
-//	prefix << 32 | suffix,
-//
+//   prefix << 32 | suffix,
 // Regular instructions are:
-//
-//	inst << 32
+//   inst << 32
 type instFormat struct {
 	Op       Op
 	Mask     uint64
@@ -80,12 +77,6 @@ func (a argField) Parse(i [2]uint32) Arg {
 		return Label(a.BitFields.ParseSigned(i) << a.Shift)
 	case TypeOffset:
 		return Offset(a.BitFields.ParseSigned(i) << a.Shift)
-	case TypeNegOffset:
-		// An oddball encoding of offset for hashchk and similar.
-		// e.g hashchk offset is 0b1111111000000000 | DX << 8 | D << 3
-		off := a.BitFields.ParseSigned(i) << a.Shift
-		neg := int64(-1) << (int(a.Shift) + a.BitFields.NumBits())
-		return Offset(neg | off)
 	}
 }
 
@@ -107,7 +98,6 @@ const (
 	TypeImmSigned            // signed immediate
 	TypeImmUnsigned          // unsigned immediate/flag/mask, this is the catch-all type
 	TypeOffset               // signed offset in load/store
-	TypeNegOffset            // A negative 16 bit value 0b1111111xxxxx000 encoded as 0bxxxxx (e.g in the hashchk instruction)
 	TypeLast                 // must be the last one
 )
 
@@ -145,8 +135,6 @@ func (t ArgType) String() string {
 		return "Label"
 	case TypeOffset:
 		return "Offset"
-	case TypeNegOffset:
-		return "NegOffset"
 	}
 }
 

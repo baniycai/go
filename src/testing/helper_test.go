@@ -5,13 +5,14 @@
 package testing
 
 import (
+	"bytes"
 	"regexp"
 	"strings"
 )
 
 func TestTBHelper(t *T) {
-	var buf strings.Builder
-	ctx := newTestContext(1, allMatcher())
+	var buf bytes.Buffer
+	ctx := newTestContext(1, newMatcher(regexp.MatchString, "", ""))
 	t1 := &T{
 		common: common{
 			signal: make(chan bool),
@@ -54,8 +55,8 @@ helperfuncs_test.go:67: 10
 }
 
 func TestTBHelperParallel(t *T) {
-	var buf strings.Builder
-	ctx := newTestContext(1, newMatcher(regexp.MatchString, "", "", ""))
+	var buf bytes.Buffer
+	ctx := newTestContext(1, newMatcher(regexp.MatchString, "", ""))
 	t1 := &T{
 		common: common{
 			signal: make(chan bool),
@@ -81,7 +82,7 @@ func (nw *noopWriter) Write(b []byte) (int, error) { return len(b), nil }
 
 func BenchmarkTBHelper(b *B) {
 	w := noopWriter(0)
-	ctx := newTestContext(1, allMatcher())
+	ctx := newTestContext(1, newMatcher(regexp.MatchString, "", ""))
 	t1 := &T{
 		common: common{
 			signal: make(chan bool),

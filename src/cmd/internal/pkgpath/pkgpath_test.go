@@ -5,7 +5,6 @@
 package pkgpath
 
 import (
-	"internal/testenv"
 	"os"
 	"testing"
 )
@@ -35,8 +34,6 @@ func init() {
 }
 
 func TestToSymbolFunc(t *testing.T) {
-	testenv.MustHaveExec(t)
-
 	const input = "pä世🜃"
 	tests := []struct {
 		env     string

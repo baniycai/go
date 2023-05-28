@@ -214,7 +214,7 @@ func ParseExprFrom(fset *token.FileSet, filename string, src any, mode Mode) (ex
 
 	// parse expr
 	p.init(fset, filename, text, mode)
-	expr = p.parseRhs()
+	expr = p.parseRhsOrType()
 
 	// If a semicolon was inserted, consume it;
 	// report an error if there's more tokens.

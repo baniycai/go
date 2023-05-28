@@ -27,10 +27,10 @@ const (
 	bindEnclosingSlice = "e"
 )
 
-var traceStarted atomic.Bool
+var traceStarted int32
 
 func getTraceContext(ctx context.Context) (traceContext, bool) {
-	if !traceStarted.Load() {
+	if atomic.LoadInt32(&traceStarted) == 0 {
 		return traceContext{}, false
 	}
 	v := ctx.Value(traceKey{})
@@ -179,7 +179,7 @@ type traceContext struct {
 
 // Start starts a trace which writes to the given file.
 func Start(ctx context.Context, file string) (context.Context, func() error, error) {
-	traceStarted.Store(true)
+	atomic.StoreInt32(&traceStarted, 1)
 	if file == "" {
 		return nil, nil, errors.New("no trace file supplied")
 	}

@@ -45,8 +45,14 @@ func RelativeTo(pkg *Package) Qualifier {
 // The Qualifier controls the printing of
 // package-level objects, and may be nil.
 func TypeString(typ Type, qf Qualifier) string {
+	return typeString(typ, qf, false)
+}
+
+func typeString(typ Type, qf Qualifier, debug bool) string {
 	var buf bytes.Buffer
-	WriteType(&buf, typ, qf)
+	w := newTypeWriter(&buf, qf)
+	w.debug = debug
+	w.typ(typ)
 	return buf.String()
 }
 
@@ -58,30 +64,29 @@ func WriteType(buf *bytes.Buffer, typ Type, qf Qualifier) {
 }
 
 // WriteSignature writes the representation of the signature sig to buf,
-// without a leading "func" keyword. The Qualifier controls the printing
-// of package-level objects, and may be nil.
+// without a leading "func" keyword.
+// The Qualifier controls the printing of
+// package-level objects, and may be nil.
 func WriteSignature(buf *bytes.Buffer, sig *Signature, qf Qualifier) {
 	newTypeWriter(buf, qf).signature(sig)
 }
 
 type typeWriter struct {
-	buf          *bytes.Buffer
-	seen         map[Type]bool
-	qf           Qualifier
-	ctxt         *Context       // if non-nil, we are type hashing
-	tparams      *TypeParamList // local type parameters
-	paramNames   bool           // if set, write function parameter names, otherwise, write types only
-	tpSubscripts bool           // if set, write type parameter indices as subscripts
-	pkgInfo      bool           // package-annotate first unexported-type field to avoid confusing type description
+	buf     *bytes.Buffer
+	seen    map[Type]bool
+	qf      Qualifier
+	ctxt    *Context       // if non-nil, we are type hashing
+	tparams *TypeParamList // local type parameters
+	debug   bool           // if true, write debug annotations
 }
 
 func newTypeWriter(buf *bytes.Buffer, qf Qualifier) *typeWriter {
-	return &typeWriter{buf, make(map[Type]bool), qf, nil, nil, true, false, false}
+	return &typeWriter{buf, make(map[Type]bool), qf, nil, nil, false}
 }
 
 func newTypeHasher(buf *bytes.Buffer, ctxt *Context) *typeWriter {
 	assert(ctxt != nil)
-	return &typeWriter{buf, make(map[Type]bool), nil, ctxt, nil, false, false, false}
+	return &typeWriter{buf, make(map[Type]bool), nil, ctxt, nil, false}
 }
 
 func (w *typeWriter) byte(b byte) {
@@ -148,29 +153,14 @@ func (w *typeWriter) typ(typ Type) {
 			if i > 0 {
 				w.byte(';')
 			}
-
-			// If disambiguating one struct for another, look for the first unexported field.
-			// Do this first in case of nested structs; tag the first-outermost field.
-			pkgAnnotate := false
-			if w.qf == nil && w.pkgInfo && !isExported(f.name) {
-				// note for embedded types, type name is field name, and "string" etc are lower case hence unexported.
-				pkgAnnotate = true
-				w.pkgInfo = false // only tag once
-			}
-
 			// This doesn't do the right thing for embedded type
 			// aliases where we should print the alias name, not
-			// the aliased type (see go.dev/issue/44410).
+			// the aliased type (see issue #44410).
 			if !f.embedded {
 				w.string(f.name)
 				w.byte(' ')
 			}
 			w.typ(f.typ)
-			if pkgAnnotate {
-				w.string(" /* package ")
-				w.string(f.pkg.Path())
-				w.string(" */ ")
-			}
 			if tag := t.Tag(i); tag != "" {
 				w.byte(' ')
 				// TODO(gri) If tag contains blanks, replacing them with '#'
@@ -201,7 +191,7 @@ func (w *typeWriter) typ(typ Type) {
 		}
 		for i, t := range t.terms {
 			if i > 0 {
-				w.string(termSep)
+				w.byte('|')
 			}
 			if t.tilde {
 				w.byte('~')
@@ -314,15 +304,8 @@ func (w *typeWriter) typ(typ Type) {
 			w.string(fmt.Sprintf("$%d", i))
 		} else {
 			w.string(t.obj.name)
-			if w.tpSubscripts || w.ctxt != nil {
+			if w.debug || w.ctxt != nil {
 				w.string(subscript(t.id))
-			}
-			// If the type parameter name is the same as a predeclared object
-			// (say int), point out where it is declared to avoid confusing
-			// error messages. This doesn't need to be super-elegant; we just
-			// need a clear indication that this is not a predeclared name.
-			if w.ctxt == nil && Universe.Lookup(t.obj.name) != nil {
-				w.string(sprintf(nil, false, " /* with %s declared at %s */", t.obj.name, t.obj.Pos()))
 			}
 		}
 
@@ -410,7 +393,9 @@ func (w *typeWriter) tParamList(list []*TypeParam) {
 }
 
 func (w *typeWriter) typeName(obj *TypeName) {
-	w.string(packagePrefix(obj.pkg, w.qf))
+	if obj.pkg != nil {
+		writePackage(w.buf, obj.pkg, w.qf)
+	}
 	w.string(obj.name)
 }
 
@@ -422,7 +407,7 @@ func (w *typeWriter) tuple(tup *Tuple, variadic bool) {
 				w.byte(',')
 			}
 			// parameter names are ignored for type identity and thus type hashes
-			if w.ctxt == nil && v.name != "" && w.paramNames {
+			if w.ctxt == nil && v.name != "" {
 				w.string(v.name)
 				w.byte(' ')
 			}

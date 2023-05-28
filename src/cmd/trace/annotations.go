@@ -370,7 +370,7 @@ func (task *taskDesc) String() string {
 	if task == nil {
 		return "task <nil>"
 	}
-	wb := new(strings.Builder)
+	wb := new(bytes.Buffer)
 	fmt.Fprintf(wb, "task %d:\t%s\n", task.id, task.name)
 	fmt.Fprintf(wb, "\tstart: %v end: %v complete: %t\n", task.firstTimestamp(), task.endTimestamp(), task.complete())
 	fmt.Fprintf(wb, "\t%d goroutines\n", len(task.goroutines))
@@ -446,7 +446,9 @@ func (task *taskDesc) descendants() []*taskDesc {
 	res := []*taskDesc{task}
 	for i := 0; len(res[i:]) > 0; i++ {
 		t := res[i]
-		res = append(res, t.children...)
+		for _, c := range t.children {
+			res = append(res, c)
+		}
 	}
 	return res
 }
@@ -494,7 +496,7 @@ func (region *regionDesc) duration() time.Duration {
 func (task *taskDesc) overlappingGCDuration(evs []*trace.Event) (overlapping time.Duration) {
 	for _, ev := range evs {
 		// make sure we only consider the global GC events.
-		if typ := ev.Type; typ != trace.EvGCStart {
+		if typ := ev.Type; typ != trace.EvGCStart && typ != trace.EvGCSTWStart {
 			continue
 		}
 
@@ -870,7 +872,7 @@ func (h *durationHistogram) ToHTML(urlmaker func(min, max time.Duration) string)
 		}
 	}
 
-	w := new(strings.Builder)
+	w := new(bytes.Buffer)
 	fmt.Fprintf(w, `<table>`)
 	for i := h.MinBucket; i <= h.MaxBucket; i++ {
 		// Tick label.
@@ -912,7 +914,7 @@ func (h *durationHistogram) String() string {
 		}
 	}
 
-	w := new(strings.Builder)
+	w := new(bytes.Buffer)
 	for i := h.MinBucket; i <= h.MaxBucket; i++ {
 		count := h.Buckets[i]
 		bar := count * barWidth / maxCount
@@ -1095,7 +1097,7 @@ Search log text: <form onsubmit="window.location.search+='&logtext='+window.logt
 `))
 
 func elapsed(d time.Duration) string {
-	b := fmt.Appendf(nil, "%.9f", d.Seconds())
+	b := []byte(fmt.Sprintf("%.9f", d.Seconds()))
 
 	// For subsecond durations, blank all zeros before decimal point,
 	// and all zeros between the decimal point and the first non-zero digit.

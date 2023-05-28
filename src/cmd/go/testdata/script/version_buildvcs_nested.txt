@@ -1,4 +1,4 @@
-[!git] skip
+[!exec:git] skip
 [!exec:hg] skip
 [short] skip
 env GOFLAGS='-n -buildvcs'

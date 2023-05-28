@@ -136,8 +136,6 @@ func osinit() {
 
 	ncpu = getncpu()
 	physPageSize = getPageSize()
-
-	osinit_hack()
 }
 
 func sysctlbynameInt32(name []byte) (int32, int32) {
@@ -210,21 +208,21 @@ func newosproc(mp *m) {
 	var err int32
 	err = pthread_attr_init(&attr)
 	if err != 0 {
-		writeErrStr(failthreadcreate)
+		write(2, unsafe.Pointer(&failthreadcreate[0]), int32(len(failthreadcreate)))
 		exit(1)
 	}
 
 	// Find out OS stack size for our own stack guard.
 	var stacksize uintptr
 	if pthread_attr_getstacksize(&attr, &stacksize) != 0 {
-		writeErrStr(failthreadcreate)
+		write(2, unsafe.Pointer(&failthreadcreate[0]), int32(len(failthreadcreate)))
 		exit(1)
 	}
 	mp.g0.stack.hi = stacksize // for mstart
 
 	// Tell the pthread library we won't join with this thread.
 	if pthread_attr_setdetachstate(&attr, _PTHREAD_CREATE_DETACHED) != 0 {
-		writeErrStr(failthreadcreate)
+		write(2, unsafe.Pointer(&failthreadcreate[0]), int32(len(failthreadcreate)))
 		exit(1)
 	}
 
@@ -232,12 +230,10 @@ func newosproc(mp *m) {
 	// setup and then calls mstart.
 	var oset sigset
 	sigprocmask(_SIG_SETMASK, &sigset_all, &oset)
-	err = retryOnEAGAIN(func() int32 {
-		return pthread_create(&attr, abi.FuncPCABI0(mstart_stub), unsafe.Pointer(mp))
-	})
+	err = pthread_create(&attr, abi.FuncPCABI0(mstart_stub), unsafe.Pointer(mp))
 	sigprocmask(_SIG_SETMASK, &oset, nil)
 	if err != 0 {
-		writeErrStr(failthreadcreate)
+		write(2, unsafe.Pointer(&failthreadcreate[0]), int32(len(failthreadcreate)))
 		exit(1)
 	}
 }
@@ -257,7 +253,7 @@ func newosproc0(stacksize uintptr, fn uintptr) {
 	var err int32
 	err = pthread_attr_init(&attr)
 	if err != 0 {
-		writeErrStr(failthreadcreate)
+		write(2, unsafe.Pointer(&failthreadcreate[0]), int32(len(failthreadcreate)))
 		exit(1)
 	}
 
@@ -267,7 +263,7 @@ func newosproc0(stacksize uintptr, fn uintptr) {
 	// we use the OS default stack size instead of the suggestion.
 	// Find out that stack size for our own stack guard.
 	if pthread_attr_getstacksize(&attr, &stacksize) != 0 {
-		writeErrStr(failthreadcreate)
+		write(2, unsafe.Pointer(&failthreadcreate[0]), int32(len(failthreadcreate)))
 		exit(1)
 	}
 	g0.stack.hi = stacksize // for mstart
@@ -275,7 +271,7 @@ func newosproc0(stacksize uintptr, fn uintptr) {
 
 	// Tell the pthread library we won't join with this thread.
 	if pthread_attr_setdetachstate(&attr, _PTHREAD_CREATE_DETACHED) != 0 {
-		writeErrStr(failthreadcreate)
+		write(2, unsafe.Pointer(&failthreadcreate[0]), int32(len(failthreadcreate)))
 		exit(1)
 	}
 
@@ -286,10 +282,13 @@ func newosproc0(stacksize uintptr, fn uintptr) {
 	err = pthread_create(&attr, fn, nil)
 	sigprocmask(_SIG_SETMASK, &oset, nil)
 	if err != 0 {
-		writeErrStr(failthreadcreate)
+		write(2, unsafe.Pointer(&failthreadcreate[0]), int32(len(failthreadcreate)))
 		exit(1)
 	}
 }
+
+var failallocatestack = []byte("runtime: failed to allocate stack for the new OS thread\n")
+var failthreadcreate = []byte("runtime: failed to create new OS thread\n")
 
 // Called to do synchronous initialization of Go code built with
 // -buildmode=c-archive or -buildmode=c-shared.
@@ -413,7 +412,7 @@ func getsig(i uint32) uintptr {
 	return *(*uintptr)(unsafe.Pointer(&sa.__sigaction_u))
 }
 
-// setSignalstackSP sets the ss_sp field of a stackt.
+// setSignaltstackSP sets the ss_sp field of a stackt.
 //
 //go:nosplit
 func setSignalstackSP(s *stackt, sp uintptr) {

@@ -54,16 +54,12 @@ func (e *HTTPError) Error() string {
 		return fmt.Sprintf("reading %s: %v\n\tserver response:%s%s", e.URL, e.Status, detailSep, e.Detail)
 	}
 
-	if eErr := e.Err; eErr != nil {
-		if pErr, ok := e.Err.(*fs.PathError); ok {
-			if u, err := url.Parse(e.URL); err == nil {
-				if fp, err := urlToFilePath(u); err == nil && pErr.Path == fp {
-					// Remove the redundant copy of the path.
-					eErr = pErr.Err
-				}
-			}
+	if err := e.Err; err != nil {
+		if pErr, ok := e.Err.(*fs.PathError); ok && strings.HasSuffix(e.URL, pErr.Path) {
+			// Remove the redundant copy of the path.
+			err = pErr.Err
 		}
-		return fmt.Sprintf("reading %s: %v", e.URL, eErr)
+		return fmt.Sprintf("reading %s: %v", e.URL, err)
 	}
 
 	return fmt.Sprintf("reading %s: %v", e.URL, e.Status)
@@ -237,10 +233,4 @@ func (b *errorDetailBuffer) Read(p []byte) (n int, err error) {
 	}
 
 	return n, err
-}
-
-// IsLocalHost reports whether the given URL refers to a local
-// (loopback) host, such as "localhost" or "127.0.0.1:8080".
-func IsLocalHost(u *url.URL) bool {
-	return isLocalHost(u)
 }

@@ -8,7 +8,7 @@ package aes
 
 import (
 	"crypto/cipher"
-	"crypto/internal/alias"
+	"crypto/internal/subtle"
 )
 
 // Assert that aesCipherAsm implements the cbcEncAble and cbcDecAble interfaces.
@@ -54,7 +54,7 @@ func (x *cbc) CryptBlocks(dst, src []byte) {
 	if len(dst) < len(src) {
 		panic("crypto/cipher: output smaller than input")
 	}
-	if alias.InexactOverlap(dst[:len(src)], src) {
+	if subtle.InexactOverlap(dst[:len(src)], src) {
 		panic("crypto/cipher: invalid buffer overlap")
 	}
 	if len(src) > 0 {

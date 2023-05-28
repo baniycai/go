@@ -1,6 +1,6 @@
 env GO111MODULE=off
 
-[!git] skip
+[!exec:git] skip
 
 # Set up some empty repositories.
 cd $WORK/_origin/foo

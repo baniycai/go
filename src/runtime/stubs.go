@@ -21,6 +21,16 @@ func add(p unsafe.Pointer, x uintptr) unsafe.Pointer {
 // getg returns the pointer to the current g.
 // The compiler rewrites calls to this function into instructions
 // that fetch the g directly (from TLS or from the dedicated register).
+// note 在 Go 的运行时库中是一个内置函数，其具体实现是由 Go 语言编译器提供，并且无法像其他普通函数一样进行查看。
+// 在代码中，我们只能调用这个函数，而不能查看其具体实现。
+// 需要注意的是，func getg() *g 函数的作用是返回当前 Goroutine 的 g 结构体指针，包含了当前 Goroutine 的状态和上下文信息
+// 简单理解，就是在编译的时候由编译器提供这个函数的具体实现
+
+// 在 Go 语言中，func getg() *g 函数之所以不是直接实现的，而是通过编译器和运行时库提供实现，主要有以下几个原因：
+// func getg() *g 函数的实现涉及到很多底层细节，包括 Goroutine 的调度、栈管理、内存分配等等。这些细节需要由编译器和运行时库共同来实现，才能确保其正确性和性能。
+// 在 Go 语言中，Goroutine 是一种轻量级线程，可以并发执行。为了实现 Goroutine 的高效调度和资源管理，Go 语言采用了一种特殊的 Goroutine 调度器。这个调度器需要和编译器、运行时库紧密协作，才能达到最佳的效果。因此，将 func getg() *g 函数的实现交给编译器和运行时库处理，也可以更好地与 Goroutine 调度器进行集成。
+// Go 语言的一个重要特点是垃圾回收机制，而 func getg() *g 函数也和垃圾回收机制密切相关。由于垃圾回收机制需要对所有内存进行扫描和标记，因此需要访问所有 Goroutine 中的栈。func getg() *g 函数的实现需要将当前 Goroutine 的 g 结构体指针保存在栈帧中，以便垃圾回收器能够正确地访问该 Goroutine 的栈。这种处理需要编译器和运行时库共同协作，才能实现准确和高效的垃圾回收。
+// 因此，为了保证 func getg() *g 函数的正确性和性能，并且与 Goroutine 调度器和垃圾回收机制紧密集成，Go 语言选择通过编译器和运行时库来提供其具体实现。
 func getg() *g
 
 // mcall switches from the g to the g0 stack and invokes fn(g),
@@ -59,10 +69,13 @@ func mcall(fn func(*g))
 //go:noescape
 func systemstack(fn func())
 
+var badsystemstackMsg = "fatal: systemstack called from unexpected goroutine"
+
 //go:nosplit
 //go:nowritebarrierrec
 func badsystemstack() {
-	writeErrStr("fatal: systemstack called from unexpected goroutine")
+	sp := stringStructOf(&badsystemstackMsg)
+	write(2, sp.str, int32(sp.len))
 }
 
 // memclrNoHeapPointers clears n bytes starting at ptr.
@@ -128,7 +141,7 @@ func fastrand() uint32 {
 	// by the compiler should be in this list.
 	if goarch.IsAmd64|goarch.IsArm64|goarch.IsPpc64|
 		goarch.IsPpc64le|goarch.IsMips64|goarch.IsMips64le|
-		goarch.IsS390x|goarch.IsRiscv64|goarch.IsLoong64 == 1 {
+		goarch.IsS390x|goarch.IsRiscv64 == 1 {
 		mp.fastrand += 0xa0761d6478bd642f
 		hi, lo := math.Mul64(mp.fastrand, mp.fastrand^0xe7037ed1a0b428db)
 		return uint32(hi ^ lo)
@@ -193,9 +206,6 @@ func fastrandu() uint {
 	return uint(fastrand64())
 }
 
-//go:linkname rand_fastrand64 math/rand.fastrand64
-func rand_fastrand64() uint64 { return fastrand64() }
-
 //go:linkname sync_fastrandn sync.fastrandn
 func sync_fastrandn(n uint32) uint32 { return fastrandn(n) }
 
@@ -222,24 +232,12 @@ func noescape(p unsafe.Pointer) unsafe.Pointer {
 	return unsafe.Pointer(x ^ 0)
 }
 
-// noEscapePtr hides a pointer from escape analysis. See noescape.
-// USE CAREFULLY!
-//
-//go:nosplit
-func noEscapePtr[T any](p *T) *T {
-	x := uintptr(unsafe.Pointer(p))
-	return (*T)(unsafe.Pointer(x ^ 0))
-}
-
 // Not all cgocallback frames are actually cgocallback,
 // so not all have these arguments. Mark them uintptr so that the GC
 // does not misinterpret memory when the arguments are not present.
 // cgocallback is not called from Go, only from crosscall2.
 // This in turn calls cgocallbackg, which is where we'll find
 // pointer-declared arguments.
-//
-// When fn is nil (frame is saved g), call dropm instead,
-// this is used when the C thread is exiting.
 func cgocallback(fn, frame, ctxt uintptr)
 
 func gogo(buf *gobuf)
@@ -351,6 +349,10 @@ func publicationBarrier()
 // A general rule is that the result of getcallersp should be used
 // immediately and can only be passed to nosplit functions.
 
+// 在某些平台上，getcallerpc() 和 getcallersp() 可能被编译器内部实现为内置函数。因此，不是所有平台都会有相应的代码实现，这里应该是没有具体实现的
+// getcallerpc() 函数返回其调用者的调用者的程序计数器（PC）。换句话说，它能够获取当前函数的调用者的返回地址。
+// getcallersp() 函数返回其调用者的调用者的栈指针（SP）。换句话说，它能够获取当前函数的调用者的栈指针位置。
+
 //go:noescape
 func getcallerpc() uintptr
 
@@ -373,6 +375,8 @@ func getcallersp() uintptr // implemented as an intrinsic on all platforms
 // pointer from a well-known register (DX on x86 architecture, etc.) directly.
 func getclosureptr() uintptr
 
+// 应该是在asm_arm64.s中映射到
+//
 //go:noescape
 func asmcgocall(fn, arg unsafe.Pointer) int32
 
@@ -457,14 +461,7 @@ func bool2int(x bool) int {
 func abort()
 
 // Called from compiled code; declared for vet; do NOT call from Go.
-func gcWriteBarrier1()
-func gcWriteBarrier2()
-func gcWriteBarrier3()
-func gcWriteBarrier4()
-func gcWriteBarrier5()
-func gcWriteBarrier6()
-func gcWriteBarrier7()
-func gcWriteBarrier8()
+func gcWriteBarrier()
 func duffzero()
 func duffcopy()
 

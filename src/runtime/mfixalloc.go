@@ -8,12 +8,9 @@
 
 package runtime
 
-import (
-	"runtime/internal/sys"
-	"unsafe"
-)
+import "unsafe"
 
-// fixalloc is a simple free-list allocator for fixed size objects.
+// FixAlloc is a simple free-list allocator for fixed size objects.
 // Malloc uses a FixAlloc wrapped around sysAlloc to manage its
 // mcache and mspan objects.
 //
@@ -26,8 +23,7 @@ import (
 // Callers can keep state in the object but the first word is
 // smashed by freeing and reallocating.
 //
-// Consider marking fixalloc'd types not in heap by embedding
-// runtime/internal/sys.NotInHeap.
+// Consider marking fixalloc'd types go:notinheap.
 type fixalloc struct {
 	size   uintptr
 	first  func(arg, p unsafe.Pointer) // called first time p is returned
@@ -46,8 +42,9 @@ type fixalloc struct {
 // this cannot be used by some of the internal GC structures. For example when
 // the sweeper is placing an unmarked object on the free list it does not want the
 // write barrier to be called since that could result in the object being reachable.
+//
+//go:notinheap
 type mlink struct {
-	_    sys.NotInHeap
 	next *mlink
 }
 

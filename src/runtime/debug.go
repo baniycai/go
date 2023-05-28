@@ -25,7 +25,7 @@ func GOMAXPROCS(n int) int {
 		return ret
 	}
 
-	stopTheWorldGC(stwGOMAXPROCS)
+	stopTheWorldGC("GOMAXPROCS")
 
 	// newprocs will be processed by startTheWorld
 	newprocs = int32(n)
@@ -85,13 +85,13 @@ func debug_modinfo() string {
 //go:linkname mayMoreStackPreempt
 func mayMoreStackPreempt() {
 	// Don't do anything on the g0 or gsignal stack.
-	gp := getg()
-	if gp == gp.m.g0 || gp == gp.m.gsignal {
+	g := getg()
+	if g == g.m.g0 || g == g.m.gsignal {
 		return
 	}
 	// Force a preemption, unless the stack is already poisoned.
-	if gp.stackguard0 < stackPoisonMin {
-		gp.stackguard0 = stackPreempt
+	if g.stackguard0 < stackPoisonMin {
+		g.stackguard0 = stackPreempt
 	}
 }
 
@@ -104,12 +104,12 @@ func mayMoreStackPreempt() {
 //go:linkname mayMoreStackMove
 func mayMoreStackMove() {
 	// Don't do anything on the g0 or gsignal stack.
-	gp := getg()
-	if gp == gp.m.g0 || gp == gp.m.gsignal {
+	g := getg()
+	if g == g.m.g0 || g == g.m.gsignal {
 		return
 	}
 	// Force stack movement, unless the stack is already poisoned.
-	if gp.stackguard0 < stackPoisonMin {
-		gp.stackguard0 = stackForceMove
+	if g.stackguard0 < stackPoisonMin {
+		g.stackguard0 = stackForceMove
 	}
 }

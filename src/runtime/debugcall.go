@@ -6,10 +6,7 @@
 
 package runtime
 
-import (
-	"internal/abi"
-	"unsafe"
-)
+import "unsafe"
 
 const (
 	debugCallSystemStack = "executing on Go runtime stack"
@@ -83,8 +80,8 @@ func debugCallCheck(pc uintptr) string {
 		if pc != f.entry() {
 			pc--
 		}
-		up := pcdatavalue(f, abi.PCDATA_UnsafePoint, pc, nil)
-		if up != abi.UnsafePointSafe {
+		up := pcdatavalue(f, _PCDATA_UnsafePoint, pc, nil)
+		if up != _PCDATA_UnsafePointSafe {
 			// Not at a safe point.
 			ret = debugCallUnsafePoint
 		}
@@ -161,10 +158,11 @@ func debugCallWrap(dispatch uintptr) {
 		gp.schedlink = 0
 
 		// Park the calling goroutine.
-		if traceEnabled() {
-			traceGoPark(traceBlockDebugCall, 1)
+		gp.waitreason = waitReasonDebugCall
+		if trace.enabled {
+			traceGoPark(traceEvGoBlock, 1)
 		}
-		casGToWaiting(gp, _Grunning, waitReasonDebugCall)
+		casgstatus(gp, _Grunning, _Gwaiting)
 		dropg()
 
 		// Directly execute the new goroutine. The debug
@@ -220,7 +218,7 @@ func debugCallWrap1() {
 		// Switch back to the calling goroutine. At some point
 		// the scheduler will schedule us again and we'll
 		// finish exiting.
-		if traceEnabled() {
+		if trace.enabled {
 			traceGoSched()
 		}
 		casgstatus(gp, _Grunning, _Grunnable)
@@ -229,7 +227,7 @@ func debugCallWrap1() {
 		globrunqput(gp)
 		unlock(&sched.lock)
 
-		if traceEnabled() {
+		if trace.enabled {
 			traceGoUnpark(callingG, 0)
 		}
 		casgstatus(callingG, _Gwaiting, _Grunnable)

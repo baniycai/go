@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"fmt"
 	"go/format"
+	"io/ioutil"
 	"log"
 	"strings"
 	"text/template"
@@ -338,7 +339,7 @@ func TestArithmeticConst(t *testing.T) {
 	}
 
 	// write to file
-	err = os.WriteFile("../arithConst_test.go", src, 0666)
+	err = ioutil.WriteFile("../arithConst_test.go", src, 0666)
 	if err != nil {
 		log.Fatalf("can't write output: %v\n", err)
 	}

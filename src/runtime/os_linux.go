@@ -21,12 +21,12 @@ type mOS struct {
 	// profileTimer holds the ID of the POSIX interval timer for profiling CPU
 	// usage on this thread.
 	//
-	// It is valid when the profileTimerValid field is true. A thread
+	// It is valid when the profileTimerValid field is non-zero. A thread
 	// creates and manages its own timer, and these fields are read and written
 	// only by this thread. But because some of the reads on profileTimerValid
-	// are in signal handling code, this field should be atomic type.
+	// are in signal handling code, access to that field uses atomic operations.
 	profileTimer      int32
-	profileTimerValid atomic.Bool
+	profileTimerValid uint32
 
 	// needPerThreadSyscall indicates that a per-thread syscall is required
 	// for doAllThreadsSyscall.
@@ -176,20 +176,12 @@ func newosproc(mp *m) {
 	// with signals disabled. It will enable them in minit.
 	var oset sigset
 	sigprocmask(_SIG_SETMASK, &sigset_all, &oset)
-	ret := retryOnEAGAIN(func() int32 {
-		r := clone(cloneFlags, stk, unsafe.Pointer(mp), unsafe.Pointer(mp.g0), unsafe.Pointer(abi.FuncPCABI0(mstart)))
-		// clone returns positive TID, negative errno.
-		// We don't care about the TID.
-		if r >= 0 {
-			return 0
-		}
-		return -r
-	})
+	ret := clone(cloneFlags, stk, unsafe.Pointer(mp), unsafe.Pointer(mp.g0), unsafe.Pointer(abi.FuncPCABI0(mstart)))
 	sigprocmask(_SIG_SETMASK, &oset, nil)
 
-	if ret != 0 {
-		print("runtime: failed to create new OS thread (have ", mcount(), " already; errno=", ret, ")\n")
-		if ret == _EAGAIN {
+	if ret < 0 {
+		print("runtime: failed to create new OS thread (have ", mcount(), " already; errno=", -ret, ")\n")
+		if ret == -_EAGAIN {
 			println("runtime: may need to increase max user processes (ulimit -u)")
 		}
 		throw("newosproc")
@@ -202,15 +194,18 @@ func newosproc(mp *m) {
 func newosproc0(stacksize uintptr, fn unsafe.Pointer) {
 	stack := sysAlloc(stacksize, &memstats.stacks_sys)
 	if stack == nil {
-		writeErrStr(failallocatestack)
+		write(2, unsafe.Pointer(&failallocatestack[0]), int32(len(failallocatestack)))
 		exit(1)
 	}
 	ret := clone(cloneFlags, unsafe.Pointer(uintptr(stack)+stacksize), nil, nil, fn)
 	if ret < 0 {
-		writeErrStr(failthreadcreate)
+		write(2, unsafe.Pointer(&failthreadcreate[0]), int32(len(failthreadcreate)))
 		exit(1)
 	}
 }
+
+var failallocatestack = []byte("runtime: failed to allocate stack for the new OS thread\n")
+var failthreadcreate = []byte("runtime: failed to create new OS thread\n")
 
 const (
 	_AT_NULL   = 0  // End of vector
@@ -226,8 +221,6 @@ var addrspace_vec [1]byte
 
 func mincore(addr unsafe.Pointer, n uintptr, dst *byte) int32
 
-var auxvreadbuf [128]uintptr
-
 func sysargs(argc int32, argv **byte) {
 	n := argc + 1
 
@@ -240,10 +233,8 @@ func sysargs(argc int32, argv **byte) {
 	n++
 
 	// now argv+n is auxv
-	auxvp := (*[1 << 28]uintptr)(add(unsafe.Pointer(argv), uintptr(n)*goarch.PtrSize))
-
-	if pairs := sysauxv(auxvp[:]); pairs != 0 {
-		auxv = auxvp[: pairs*2 : pairs*2]
+	auxv := (*[1 << 28]uintptr)(add(unsafe.Pointer(argv), uintptr(n)*goarch.PtrSize))
+	if sysauxv(auxv[:]) != 0 {
 		return
 	}
 	// In some situations we don't get a loader-provided
@@ -273,24 +264,23 @@ func sysargs(argc int32, argv **byte) {
 		munmap(p, size)
 		return
 	}
-
-	n = read(fd, noescape(unsafe.Pointer(&auxvreadbuf[0])), int32(unsafe.Sizeof(auxvreadbuf)))
+	var buf [128]uintptr
+	n = read(fd, noescape(unsafe.Pointer(&buf[0])), int32(unsafe.Sizeof(buf)))
 	closefd(fd)
 	if n < 0 {
 		return
 	}
 	// Make sure buf is terminated, even if we didn't read
 	// the whole file.
-	auxvreadbuf[len(auxvreadbuf)-2] = _AT_NULL
-	pairs := sysauxv(auxvreadbuf[:])
-	auxv = auxvreadbuf[: pairs*2 : pairs*2]
+	buf[len(buf)-2] = _AT_NULL
+	sysauxv(buf[:])
 }
 
 // startupRandomData holds random bytes initialized at startup. These come from
 // the ELF AT_RANDOM auxiliary vector.
 var startupRandomData []byte
 
-func sysauxv(auxv []uintptr) (pairs int) {
+func sysauxv(auxv []uintptr) int {
 	var i int
 	for ; auxv[i] != _AT_NULL; i += 2 {
 		tag, val := auxv[i], auxv[i+1]
@@ -424,7 +414,7 @@ func mdestroy(mp *m) {
 //#define sa_handler k_sa_handler
 //#endif
 
-func sigreturn__sigaction()
+func sigreturn()
 func sigtramp() // Called via C ABI
 func cgoSigtramp()
 
@@ -466,12 +456,6 @@ func osyield_no_g() {
 
 func pipe2(flags int32) (r, w int32, errno int32)
 
-//go:nosplit
-func fcntl(fd, cmd, arg int32) (ret int32, errno int32) {
-	r, _, err := syscall.Syscall6(syscall.SYS_FCNTL, uintptr(fd), uintptr(cmd), uintptr(arg), 0, 0, 0)
-	return int32(r), int32(err)
-}
-
 const (
 	_si_max_size    = 128
 	_sigev_max_size = 64
@@ -487,7 +471,7 @@ func setsig(i uint32, fn uintptr) {
 	// should not be used". x86_64 kernel requires it. Only use it on
 	// x86.
 	if GOARCH == "386" || GOARCH == "amd64" {
-		sa.sa_restorer = abi.FuncPCABI0(sigreturn__sigaction)
+		sa.sa_restorer = abi.FuncPCABI0(sigreturn)
 	}
 	if fn == abi.FuncPCABIInternal(sighandler) { // abi.FuncPCABIInternal(sighandler) matches the callers in signal_unix.go
 		if iscgo {
@@ -520,7 +504,7 @@ func getsig(i uint32) uintptr {
 	return sa.sa_handler
 }
 
-// setSignalstackSP sets the ss_sp field of a stackt.
+// setSignaltstackSP sets the ss_sp field of a stackt.
 //
 //go:nosplit
 func setSignalstackSP(s *stackt, sp uintptr) {
@@ -569,6 +553,9 @@ func signalM(mp *m, sig int) {
 	tgkill(getpid(), int(mp.procid), sig)
 }
 
+// go118UseTimerCreateProfiler enables the per-thread CPU profiler.
+const go118UseTimerCreateProfiler = true
+
 // validSIGPROF compares this signal delivery's code against the signal sources
 // that the profiler uses, returning whether the delivery should be processed.
 // To be processed, a signal delivery from a known profiling mechanism should
@@ -606,7 +593,7 @@ func validSIGPROF(mp *m, c *sigctxt) bool {
 
 	// Having an M means the thread interacts with the Go scheduler, and we can
 	// check whether there's an active per-thread timer for this thread.
-	if mp.profileTimerValid.Load() {
+	if atomic.Load(&mp.profileTimerValid) != 0 {
 		// If this M has its own per-thread CPU profiling interval timer, we
 		// should track the SIGPROF signals that come from that timer (for
 		// accurate reporting of its CPU usage; see issue 35057) and ignore any
@@ -627,10 +614,14 @@ func setThreadCPUProfiler(hz int32) {
 	mp := getg().m
 	mp.profilehz = hz
 
+	if !go118UseTimerCreateProfiler {
+		return
+	}
+
 	// destroy any active timer
-	if mp.profileTimerValid.Load() {
+	if atomic.Load(&mp.profileTimerValid) != 0 {
 		timerid := mp.profileTimer
-		mp.profileTimerValid.Store(false)
+		atomic.Store(&mp.profileTimerValid, 0)
 		mp.profileTimer = 0
 
 		ret := timer_delete(timerid)
@@ -690,7 +681,7 @@ func setThreadCPUProfiler(hz int32) {
 	}
 
 	mp.profileTimer = timerid
-	mp.profileTimerValid.Store(true)
+	atomic.Store(&mp.profileTimerValid, 1)
 }
 
 // perThreadSyscallArgs contains the system call number, arguments, and
@@ -735,7 +726,7 @@ func syscall_runtime_doAllThreadsSyscall(trap, a1, a2, a3, a4, a5, a6 uintptr) (
 	// N.B. Internally, this function does not depend on STW to
 	// successfully change every thread. It is only needed for user
 	// expectations, per above.
-	stopTheWorld(stwAllThreadsSyscall)
+	stopTheWorld("doAllThreadsSyscall")
 
 	// This function depends on several properties:
 	//
@@ -889,23 +880,9 @@ func runPerThreadSyscall() {
 	}
 	if errno != 0 || r1 != args.r1 || r2 != args.r2 {
 		print("trap:", args.trap, ", a123456=[", args.a1, ",", args.a2, ",", args.a3, ",", args.a4, ",", args.a5, ",", args.a6, "]\n")
-		print("results: got {r1=", r1, ",r2=", r2, ",errno=", errno, "}, want {r1=", args.r1, ",r2=", args.r2, ",errno=0}\n")
+		print("results: got {r1=", r1, ",r2=", r2, ",errno=", errno, "}, want {r1=", args.r1, ",r2=", args.r2, ",errno=0\n")
 		fatal("AllThreadsSyscall6 results differ between threads; runtime corrupted")
 	}
 
 	gp.m.needPerThreadSyscall.Store(0)
-}
-
-const (
-	_SI_USER  = 0
-	_SI_TKILL = -6
-)
-
-// sigFromUser reports whether the signal was sent because of a call
-// to kill or tgkill.
-//
-//go:nosplit
-func (c *sigctxt) sigFromUser() bool {
-	code := int32(c.sigcode())
-	return code == _SI_USER || code == _SI_TKILL
 }

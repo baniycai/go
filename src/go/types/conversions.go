@@ -8,11 +8,11 @@ package types
 
 import (
 	"go/constant"
-	. "internal/types/errors"
+	"go/token"
 	"unicode"
 )
 
-// conversion type-checks the conversion T(x).
+// Conversion type-checks the conversion T(x).
 // The result is in x.
 func (check *Checker) conversion(x *operand, T Type) {
 	constArg := x.mode == constant_
@@ -58,7 +58,7 @@ func (check *Checker) conversion(x *operand, T Type) {
 				return true
 			}
 			if !constConvertibleTo(u, nil) {
-				cause = check.sprintf("cannot convert %s to type %s (in %s)", x, u, T)
+				cause = check.sprintf("cannot convert %s to %s (in %s)", x, u, T)
 				return false
 			}
 			return true
@@ -71,10 +71,22 @@ func (check *Checker) conversion(x *operand, T Type) {
 	}
 
 	if !ok {
-		if cause != "" {
-			check.errorf(x, InvalidConversion, "cannot convert %s to type %s: %s", x, T, cause)
+		// TODO(rfindley): use types2-style error reporting here.
+		if compilerErrorMessages {
+			if cause != "" {
+				// Add colon at end of line if we have a following cause.
+				err := newErrorf(x, _InvalidConversion, "cannot convert %s to type %s:", x, T)
+				err.errorf(token.NoPos, cause)
+				check.report(err)
+			} else {
+				check.errorf(x, _InvalidConversion, "cannot convert %s to type %s", x, T)
+			}
 		} else {
-			check.errorf(x, InvalidConversion, "cannot convert %s to type %s", x, T)
+			if cause != "" {
+				check.errorf(x, _InvalidConversion, "cannot convert %s to %s (%s)", x, T, cause)
+			} else {
+				check.errorf(x, _InvalidConversion, "cannot convert %s to %s", x, T)
+			}
 		}
 		x.mode = invalid
 		return
@@ -111,7 +123,7 @@ func (check *Checker) conversion(x *operand, T Type) {
 // the spec) is that we cannot shift a floating-point value: 1 in 1<<s should
 // be converted to UntypedFloat because of the addition of 1.0. Fixing this
 // is tricky because we'd have to run updateExprType on the argument first.
-// (go.dev/issue/21982.)
+// (Issue #21982.)
 
 // convertibleTo reports whether T(x) is valid. In the failure case, *cause
 // may be set to the cause for the failure.
@@ -175,33 +187,18 @@ func (x *operand) convertibleTo(check *Checker, T Type, cause *string) bool {
 		return true
 	}
 
-	// "V is a slice, T is an array or pointer-to-array type,
+	// "V a slice, T is a pointer-to-array type,
 	// and the slice and array types have identical element types."
 	if s, _ := Vu.(*Slice); s != nil {
-		switch a := Tu.(type) {
-		case *Array:
-			if Identical(s.Elem(), a.Elem()) {
-				if check == nil || check.allowVersion(check.pkg, x, go1_20) {
-					return true
-				}
-				// check != nil
-				if cause != nil {
-					// TODO(gri) consider restructuring versionErrorf so we can use it here and below
-					*cause = "conversion of slices to arrays requires go1.20 or later"
-				}
-				return false
-			}
-		case *Pointer:
-			if a, _ := under(a.Elem()).(*Array); a != nil {
+		if p, _ := Tu.(*Pointer); p != nil {
+			if a, _ := under(p.Elem()).(*Array); a != nil {
 				if Identical(s.Elem(), a.Elem()) {
-					if check == nil || check.allowVersion(check.pkg, x, go1_17) {
+					if check == nil || check.allowVersion(check.pkg, 1, 17) {
 						return true
 					}
-					// check != nil
 					if cause != nil {
 						*cause = "conversion of slices to array pointers requires go1.17 or later"
 					}
-					return false
 				}
 			}
 		}
@@ -237,7 +234,7 @@ func (x *operand) convertibleTo(check *Checker, T Type, cause *string) bool {
 					return false // no specific types
 				}
 				if !x.convertibleTo(check, T.typ, cause) {
-					errorf("cannot convert %s (in %s) to type %s (in %s)", V.typ, Vp, T.typ, Tp)
+					errorf("cannot convert %s (in %s) to %s (in %s)", V.typ, Vp, T.typ, Tp)
 					return false
 				}
 				return true
@@ -251,7 +248,7 @@ func (x *operand) convertibleTo(check *Checker, T Type, cause *string) bool {
 			}
 			x.typ = V.typ
 			if !x.convertibleTo(check, T, cause) {
-				errorf("cannot convert %s (in %s) to type %s", V.typ, Vp, T)
+				errorf("cannot convert %s (in %s) to %s", V.typ, Vp, T)
 				return false
 			}
 			return true
@@ -262,7 +259,7 @@ func (x *operand) convertibleTo(check *Checker, T Type, cause *string) bool {
 				return false // no specific types
 			}
 			if !x.convertibleTo(check, T.typ, cause) {
-				errorf("cannot convert %s to type %s (in %s)", x.typ, T.typ, Tp)
+				errorf("cannot convert %s to %s (in %s)", x.typ, T.typ, Tp)
 				return false
 			}
 			return true

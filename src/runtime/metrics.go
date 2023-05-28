@@ -7,7 +7,7 @@ package runtime
 // Metrics implementation exported to runtime/metrics.
 
 import (
-	"internal/godebugs"
+	"runtime/internal/atomic"
 	"unsafe"
 )
 
@@ -41,7 +41,7 @@ func metricsLock() {
 	// Acquire the metricsSema but with handoff. Operations are typically
 	// expensive enough that queueing up goroutines and handing off between
 	// them will be noticeably better-behaved.
-	semacquire1(&metricsSema, true, 0, 0, waitReasonSemacquire)
+	semacquire1(&metricsSema, true, 0, 0)
 	if raceenabled {
 		raceacquire(unsafe.Pointer(&metricsSema))
 	}
@@ -91,83 +91,6 @@ func initMetrics() {
 				out.scalar = uint64(NumCgoCall())
 			},
 		},
-		"/cpu/classes/gc/mark/assist:cpu-seconds": {
-			deps: makeStatDepSet(cpuStatsDep),
-			compute: func(in *statAggregate, out *metricValue) {
-				out.kind = metricKindFloat64
-				out.scalar = float64bits(nsToSec(in.cpuStats.gcAssistTime))
-			},
-		},
-		"/cpu/classes/gc/mark/dedicated:cpu-seconds": {
-			deps: makeStatDepSet(cpuStatsDep),
-			compute: func(in *statAggregate, out *metricValue) {
-				out.kind = metricKindFloat64
-				out.scalar = float64bits(nsToSec(in.cpuStats.gcDedicatedTime))
-			},
-		},
-		"/cpu/classes/gc/mark/idle:cpu-seconds": {
-			deps: makeStatDepSet(cpuStatsDep),
-			compute: func(in *statAggregate, out *metricValue) {
-				out.kind = metricKindFloat64
-				out.scalar = float64bits(nsToSec(in.cpuStats.gcIdleTime))
-			},
-		},
-		"/cpu/classes/gc/pause:cpu-seconds": {
-			deps: makeStatDepSet(cpuStatsDep),
-			compute: func(in *statAggregate, out *metricValue) {
-				out.kind = metricKindFloat64
-				out.scalar = float64bits(nsToSec(in.cpuStats.gcPauseTime))
-			},
-		},
-		"/cpu/classes/gc/total:cpu-seconds": {
-			deps: makeStatDepSet(cpuStatsDep),
-			compute: func(in *statAggregate, out *metricValue) {
-				out.kind = metricKindFloat64
-				out.scalar = float64bits(nsToSec(in.cpuStats.gcTotalTime))
-			},
-		},
-		"/cpu/classes/idle:cpu-seconds": {
-			deps: makeStatDepSet(cpuStatsDep),
-			compute: func(in *statAggregate, out *metricValue) {
-				out.kind = metricKindFloat64
-				out.scalar = float64bits(nsToSec(in.cpuStats.idleTime))
-			},
-		},
-		"/cpu/classes/scavenge/assist:cpu-seconds": {
-			deps: makeStatDepSet(cpuStatsDep),
-			compute: func(in *statAggregate, out *metricValue) {
-				out.kind = metricKindFloat64
-				out.scalar = float64bits(nsToSec(in.cpuStats.scavengeAssistTime))
-			},
-		},
-		"/cpu/classes/scavenge/background:cpu-seconds": {
-			deps: makeStatDepSet(cpuStatsDep),
-			compute: func(in *statAggregate, out *metricValue) {
-				out.kind = metricKindFloat64
-				out.scalar = float64bits(nsToSec(in.cpuStats.scavengeBgTime))
-			},
-		},
-		"/cpu/classes/scavenge/total:cpu-seconds": {
-			deps: makeStatDepSet(cpuStatsDep),
-			compute: func(in *statAggregate, out *metricValue) {
-				out.kind = metricKindFloat64
-				out.scalar = float64bits(nsToSec(in.cpuStats.scavengeTotalTime))
-			},
-		},
-		"/cpu/classes/total:cpu-seconds": {
-			deps: makeStatDepSet(cpuStatsDep),
-			compute: func(in *statAggregate, out *metricValue) {
-				out.kind = metricKindFloat64
-				out.scalar = float64bits(nsToSec(in.cpuStats.totalTime))
-			},
-		},
-		"/cpu/classes/user:cpu-seconds": {
-			deps: makeStatDepSet(cpuStatsDep),
-			compute: func(in *statAggregate, out *metricValue) {
-				out.kind = metricKindFloat64
-				out.scalar = float64bits(nsToSec(in.cpuStats.userTime))
-			},
-		},
 		"/gc/cycles/automatic:gc-cycles": {
 			deps: makeStatDepSet(sysStatsDep),
 			compute: func(in *statAggregate, out *metricValue) {
@@ -187,30 +110,6 @@ func initMetrics() {
 			compute: func(in *statAggregate, out *metricValue) {
 				out.kind = metricKindUint64
 				out.scalar = in.sysStats.gcCyclesDone
-			},
-		},
-		"/gc/scan/globals:bytes": {
-			compute: func(in *statAggregate, out *metricValue) {
-				out.kind = metricKindUint64
-				out.scalar = in.gcStats.globalsScan
-			},
-		},
-		"/gc/scan/heap:bytes": {
-			compute: func(in *statAggregate, out *metricValue) {
-				out.kind = metricKindUint64
-				out.scalar = in.gcStats.heapScan
-			},
-		},
-		"/gc/scan/stack:bytes": {
-			compute: func(in *statAggregate, out *metricValue) {
-				out.kind = metricKindUint64
-				out.scalar = in.gcStats.stackScan
-			},
-		},
-		"/gc/scan/total:bytes": {
-			compute: func(in *statAggregate, out *metricValue) {
-				out.kind = metricKindUint64
-				out.scalar = in.gcStats.totalScan
 			},
 		},
 		"/gc/heap/allocs-by-size:bytes": {
@@ -272,25 +171,6 @@ func initMetrics() {
 				out.scalar = in.sysStats.heapGoal
 			},
 		},
-		"/gc/gomemlimit:bytes": {
-			compute: func(in *statAggregate, out *metricValue) {
-				out.kind = metricKindUint64
-				out.scalar = uint64(gcController.memoryLimit.Load())
-			},
-		},
-		"/gc/gogc:percent": {
-			compute: func(in *statAggregate, out *metricValue) {
-				out.kind = metricKindUint64
-				out.scalar = uint64(gcController.gcPercent.Load())
-			},
-		},
-		"/gc/heap/live:bytes": {
-			deps: makeStatDepSet(heapStatsDep),
-			compute: func(in *statAggregate, out *metricValue) {
-				out.kind = metricKindUint64
-				out.scalar = gcController.heapMarked
-			},
-		},
 		"/gc/heap/objects:objects": {
 			deps: makeStatDepSet(heapStatsDep),
 			compute: func(in *statAggregate, out *metricValue) {
@@ -317,11 +197,10 @@ func initMetrics() {
 				// The bottom-most bucket, containing negative values, is tracked
 				// as a separately as underflow, so fill that in manually and then
 				// iterate over the rest.
-				hist.counts[0] = memstats.gcPauseDist.underflow.Load()
+				hist.counts[0] = atomic.Load64(&memstats.gcPauseDist.underflow)
 				for i := range memstats.gcPauseDist.counts {
-					hist.counts[i+1] = memstats.gcPauseDist.counts[i].Load()
+					hist.counts[i+1] = atomic.Load64(&memstats.gcPauseDist.counts[i])
 				}
-				hist.counts[len(hist.counts)-1] = memstats.gcPauseDist.overflow.Load()
 			},
 		},
 		"/gc/stack/starting-size:bytes": {
@@ -448,53 +327,14 @@ func initMetrics() {
 		"/sched/latencies:seconds": {
 			compute: func(_ *statAggregate, out *metricValue) {
 				hist := out.float64HistOrInit(timeHistBuckets)
-				hist.counts[0] = sched.timeToRun.underflow.Load()
+				hist.counts[0] = atomic.Load64(&sched.timeToRun.underflow)
 				for i := range sched.timeToRun.counts {
-					hist.counts[i+1] = sched.timeToRun.counts[i].Load()
+					hist.counts[i+1] = atomic.Load64(&sched.timeToRun.counts[i])
 				}
-				hist.counts[len(hist.counts)-1] = sched.timeToRun.overflow.Load()
-			},
-		},
-		"/sync/mutex/wait/total:seconds": {
-			compute: func(_ *statAggregate, out *metricValue) {
-				out.kind = metricKindFloat64
-				out.scalar = float64bits(nsToSec(sched.totalMutexWaitTime.Load()))
 			},
 		},
 	}
-
-	for _, info := range godebugs.All {
-		if !info.Opaque {
-			metrics["/godebug/non-default-behavior/"+info.Name+":events"] = metricData{compute: compute0}
-		}
-	}
-
 	metricsInit = true
-}
-
-func compute0(_ *statAggregate, out *metricValue) {
-	out.kind = metricKindUint64
-	out.scalar = 0
-}
-
-type metricReader func() uint64
-
-func (f metricReader) compute(_ *statAggregate, out *metricValue) {
-	out.kind = metricKindUint64
-	out.scalar = f()
-}
-
-//go:linkname godebug_registerMetric internal/godebug.registerMetric
-func godebug_registerMetric(name string, read func() uint64) {
-	metricsLock()
-	initMetrics()
-	d, ok := metrics[name]
-	if !ok {
-		throw("runtime: unexpected metric registration for " + name)
-	}
-	d.compute = metricReader(read).compute
-	metrics[name] = d
-	metricsUnlock()
 }
 
 // statDep is a dependency on a group of statistics
@@ -504,8 +344,6 @@ type statDep uint
 const (
 	heapStatsDep statDep = iota // corresponds to heapStatsAggregate
 	sysStatsDep                 // corresponds to sysStatsAggregate
-	cpuStatsDep                 // corresponds to cpuStatsAggregate
-	gcStatsDep                  // corresponds to gcStatsAggregate
 	numStatsDeps
 )
 
@@ -523,7 +361,7 @@ func makeStatDepSet(deps ...statDep) statDepSet {
 	return s
 }
 
-// difference returns set difference of s from b as a new set.
+// differennce returns set difference of s from b as a new set.
 func (s statDepSet) difference(b statDepSet) statDepSet {
 	var c statDepSet
 	for i := range s {
@@ -651,56 +489,15 @@ func (a *sysStatsAggregate) compute() {
 	})
 }
 
-// cpuStatsAggregate represents CPU stats obtained from the runtime
-// acquired together to avoid skew and inconsistencies.
-type cpuStatsAggregate struct {
-	cpuStats
-}
-
-// compute populates the cpuStatsAggregate with values from the runtime.
-func (a *cpuStatsAggregate) compute() {
-	a.cpuStats = work.cpuStats
-	// TODO(mknyszek): Update the the CPU stats again so that we're not
-	// just relying on the STW snapshot. The issue here is that currently
-	// this will cause non-monotonicity in the "user" CPU time metric.
-	//
-	// a.cpuStats.accumulate(nanotime(), gcphase == _GCmark)
-}
-
-// cpuStatsAggregate represents various GC stats obtained from the runtime
-// acquired together to avoid skew and inconsistencies.
-type gcStatsAggregate struct {
-	heapScan    uint64
-	stackScan   uint64
-	globalsScan uint64
-	totalScan   uint64
-}
-
-// compute populates the gcStatsAggregate with values from the runtime.
-func (a *gcStatsAggregate) compute() {
-	a.heapScan = gcController.heapScan.Load()
-	a.stackScan = uint64(gcController.lastStackScan.Load())
-	a.globalsScan = gcController.globalsScan.Load()
-	a.totalScan = a.heapScan + a.stackScan + a.globalsScan
-}
-
-// nsToSec takes a duration in nanoseconds and converts it to seconds as
-// a float64.
-func nsToSec(ns int64) float64 {
-	return float64(ns) / 1e9
-}
-
 // statAggregate is the main driver of the metrics implementation.
 //
 // It contains multiple aggregates of runtime statistics, as well
-// as a set of these aggregates that it has populated. The aggregates
+// as a set of these aggregates that it has populated. The aggergates
 // are populated lazily by its ensure method.
 type statAggregate struct {
 	ensured   statDepSet
 	heapStats heapStatsAggregate
 	sysStats  sysStatsAggregate
-	cpuStats  cpuStatsAggregate
-	gcStats   gcStatsAggregate
 }
 
 // ensure populates statistics aggregates determined by deps if they
@@ -719,16 +516,12 @@ func (a *statAggregate) ensure(deps *statDepSet) {
 			a.heapStats.compute()
 		case sysStatsDep:
 			a.sysStats.compute()
-		case cpuStatsDep:
-			a.cpuStats.compute()
-		case gcStatsDep:
-			a.gcStats.compute()
 		}
 	}
 	a.ensured = a.ensured.union(missing)
 }
 
-// metricKind is a runtime copy of runtime/metrics.ValueKind and
+// metricValidKind is a runtime copy of runtime/metrics.ValueKind and
 // must be kept structurally identical to that type.
 type metricKind int
 
@@ -788,32 +581,6 @@ type metricFloat64Histogram struct {
 // an argument to a dynamically-defined function, and we'd
 // like to avoid it escaping to the heap.
 var agg statAggregate
-
-type metricName struct {
-	name string
-	kind metricKind
-}
-
-// readMetricNames is the implementation of runtime/metrics.readMetricNames,
-// used by the runtime/metrics test and otherwise unreferenced.
-//
-//go:linkname readMetricNames runtime/metrics_test.runtime_readMetricNames
-func readMetricNames() []string {
-	metricsLock()
-	initMetrics()
-	n := len(metrics)
-	metricsUnlock()
-
-	list := make([]string, 0, n)
-
-	metricsLock()
-	for name := range metrics {
-		list = append(list, name)
-	}
-	metricsUnlock()
-
-	return list
-}
 
 // readMetrics is the implementation of runtime/metrics.Read.
 //

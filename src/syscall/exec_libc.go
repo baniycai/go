@@ -43,7 +43,7 @@ func runtime_AfterForkInChild()
 
 func chdir(path uintptr) (err Errno)
 func chroot1(path uintptr) (err Errno)
-func closeFD(fd uintptr) (err Errno)
+func close(fd uintptr) (err Errno)
 func dup2child(old uintptr, new uintptr) (val uintptr, err Errno)
 func execve(path uintptr, argv uintptr, envp uintptr) (err Errno)
 func exit(code uintptr)
@@ -53,7 +53,6 @@ func getpid() (pid uintptr, err Errno)
 func ioctl(fd uintptr, req uintptr, arg uintptr) (err Errno)
 func setgid(gid uintptr) (err Errno)
 func setgroups1(ngid uintptr, gid uintptr) (err Errno)
-func setrlimit1(which uintptr, lim unsafe.Pointer) (err Errno)
 func setsid() (pid uintptr, err Errno)
 func setuid(uid uintptr) (err Errno)
 func setpgid(pid uintptr, pgid uintptr) (err Errno)
@@ -82,16 +81,11 @@ func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr
 	// Declare all variables at top in case any
 	// declarations require heap allocation (e.g., err1).
 	var (
-		r1              uintptr
-		err1            Errno
-		nextfd          int
-		i               int
-		pgrp            _Pid_t
-		cred            *Credential
-		ngroups, groups uintptr
+		r1     uintptr
+		err1   Errno
+		nextfd int
+		i      int
 	)
-
-	rlim, rlimOK := origRlimitNofile.Load().(Rlimit)
 
 	// guard against side effects of shuffling fds below.
 	// Make sure that nextfd is beyond any currently open files so
@@ -141,7 +135,7 @@ func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr
 	}
 
 	if sys.Foreground {
-		pgrp = _Pid_t(sys.Pgid)
+		pgrp := _Pid_t(sys.Pgid)
 		if pgrp == 0 {
 			r1, err1 = getpid()
 			if err1 != 0 {
@@ -171,9 +165,9 @@ func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr
 	}
 
 	// User and groups
-	if cred = sys.Credential; cred != nil {
-		ngroups = uintptr(len(cred.Groups))
-		groups = uintptr(0)
+	if cred := sys.Credential; cred != nil {
+		ngroups := uintptr(len(cred.Groups))
+		groups := uintptr(0)
 		if ngroups > 0 {
 			groups = uintptr(unsafe.Pointer(&cred.Groups[0]))
 		}
@@ -205,7 +199,7 @@ func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr
 	// so that pass 2 won't stomp on an fd it needs later.
 	if pipe < nextfd {
 		switch runtime.GOOS {
-		case "illumos", "solaris":
+		case "illumos":
 			_, err1 = fcntl1(uintptr(pipe), _F_DUP2FD_CLOEXEC, uintptr(nextfd))
 		default:
 			_, err1 = dup2child(uintptr(pipe), uintptr(nextfd))
@@ -221,12 +215,12 @@ func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr
 		nextfd++
 	}
 	for i = 0; i < len(fd); i++ {
-		if fd[i] >= 0 && fd[i] < i {
+		if fd[i] >= 0 && fd[i] < int(i) {
 			if nextfd == pipe { // don't stomp on pipe
 				nextfd++
 			}
 			switch runtime.GOOS {
-			case "illumos", "solaris":
+			case "illumos":
 				_, err1 = fcntl1(uintptr(fd[i]), _F_DUP2FD_CLOEXEC, uintptr(nextfd))
 			default:
 				_, err1 = dup2child(uintptr(fd[i]), uintptr(nextfd))
@@ -246,10 +240,10 @@ func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr
 	// Pass 2: dup fd[i] down onto i.
 	for i = 0; i < len(fd); i++ {
 		if fd[i] == -1 {
-			closeFD(uintptr(i))
+			close(uintptr(i))
 			continue
 		}
-		if fd[i] == i {
+		if fd[i] == int(i) {
 			// dup2(i, i) won't clear close-on-exec flag on Linux,
 			// probably not elsewhere either.
 			_, err1 = fcntl1(uintptr(fd[i]), F_SETFD, 0)
@@ -271,7 +265,7 @@ func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr
 	// Programs that know they inherit fds >= 3 will need
 	// to set them close-on-exec.
 	for i = len(fd); i < 3; i++ {
-		closeFD(uintptr(i))
+		close(uintptr(i))
 	}
 
 	// Detach fd 0 from tty
@@ -295,11 +289,6 @@ func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr
 		}
 	}
 
-	// Restore original rlimit.
-	if rlimOK && rlim.Cur != 0 {
-		setrlimit1(RLIMIT_NOFILE, unsafe.Pointer(&rlim))
-	}
-
 	// Time to exec.
 	err1 = execve(
 		uintptr(unsafe.Pointer(argv0)),
@@ -312,8 +301,4 @@ childerror:
 	for {
 		exit(253)
 	}
-}
-
-func ioctlPtr(fd, req uintptr, arg unsafe.Pointer) (err Errno) {
-	return ioctl(fd, req, uintptr(arg))
 }

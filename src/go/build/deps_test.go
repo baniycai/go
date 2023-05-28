@@ -1,4 +1,4 @@
-// Copyright 2022 The Go Authors. All rights reserved.
+// Copyright 2012 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -11,7 +11,6 @@ import (
 	"bytes"
 	"fmt"
 	"go/token"
-	"internal/dag"
 	"internal/testenv"
 	"io/fs"
 	"os"
@@ -30,22 +29,50 @@ import (
 // without prior discussion.
 // Negative assertions should almost never be removed.
 //
-// "a < b" means package b can import package a.
+// The general syntax of a rule is:
 //
-// See `go doc internal/dag' for the full syntax.
+//	a, b < c, d;
+//
+// which means c and d come after a and b in the partial order
+// (that is, c and d can import a and b),
+// but doesn't provide a relative order between a vs b or c vs d.
+//
+// The rules can chain together, as in:
+//
+//	e < f, g < h;
+//
+// which is equivalent to
+//
+//	e < f, g;
+//	f, g < h;
+//
+// Except for the special bottom element "NONE", each name
+// must appear exactly once on the right-hand side of a rule.
+// That rule serves as the definition of the allowed dependencies
+// for that name. The definition must appear before any uses
+// of the name on the left-hand side of a rule. (That is, the
+// rules themselves must be ordered according to the partial
+// order, for easier reading by people.)
+//
+// Negative assertions double-check the partial order:
+//
+//	i !< j
+//
+// means that it must NOT be the case that i < j.
+// Negative assertions may appear anywhere in the rules,
+// even before i and j have been defined.
+//
+// Comments begin with #.
 //
 // All-caps names are pseudo-names for specific points
 // in the dependency lattice.
 var depsRules = `
 	# No dependencies allowed for any of these packages.
 	NONE
-	< cmp, container/list, container/ring,
-	  internal/cfg, internal/coverage, internal/coverage/rtcov,
-	  internal/coverage/uleb128, internal/coverage/calloc,
-	  internal/cpu, internal/goarch, internal/godebugs,
+	< constraints, container/list, container/ring,
+	  internal/cfg, internal/cpu, internal/goarch,
 	  internal/goexperiment, internal/goos,
-	  internal/goversion, internal/nettrace, internal/platform,
-	  log/internal,
+	  internal/goversion, internal/nettrace,
 	  unicode/utf8, unicode/utf16, unicode,
 	  unsafe;
 
@@ -53,12 +80,9 @@ var depsRules = `
 	internal/goarch, unsafe
 	< internal/abi;
 
-	unsafe < maps;
-
 	# RUNTIME is the core runtime group of packages, all of them very light-weight.
 	internal/abi, internal/cpu, internal/goarch,
-	internal/coverage/rtcov, internal/godebugs, internal/goexperiment,
-	internal/goos, unsafe
+	internal/goexperiment, internal/goos, unsafe
 	< internal/bytealg
 	< internal/itoa
 	< internal/unsafeheader
@@ -70,8 +94,6 @@ var depsRules = `
 	< sync/atomic
 	< internal/race
 	< sync
-	< internal/bisect
-	< internal/godebug
 	< internal/reflectlite
 	< errors
 	< internal/oserror, math/bits
@@ -83,9 +105,6 @@ var depsRules = `
 
 	RUNTIME
 	< io;
-
-	RUNTIME
-	< arena;
 
 	syscall !< io;
 	reflect !< sort;
@@ -148,7 +167,6 @@ var depsRules = `
 	io/fs
 	< internal/testlog
 	< internal/poll
-	< internal/safefilepath
 	< os
 	< os/signal;
 
@@ -160,6 +178,8 @@ var depsRules = `
 	os/signal, STR
 	< path/filepath
 	< io/ioutil;
+
+	os < internal/godebug;
 
 	path/filepath, internal/godebug < os/exec;
 
@@ -173,7 +193,7 @@ var depsRules = `
 
 	# FMT is OS (which includes string routines) plus reflect and fmt.
 	# It does not include package log, which should be avoided in core packages.
-	arena, strconv, unicode
+	strconv, unicode
 	< reflect;
 
 	os, reflect
@@ -188,18 +208,13 @@ var depsRules = `
 	# Misc packages needing only FMT.
 	FMT
 	< html,
-	  internal/dag,
 	  internal/goroot,
-	  internal/types/errors,
 	  mime/quotedprintable,
 	  net/internal/socktest,
 	  net/url,
 	  runtime/trace,
 	  text/scanner,
 	  text/tabwriter;
-
-	io, reflect
-	< internal/saferio;
 
 	# encodings
 	# core ones do not use fmt.
@@ -214,19 +229,14 @@ var depsRules = `
 
 	fmt !< encoding/base32, encoding/base64;
 
-	FMT, encoding/base32, encoding/base64, internal/saferio
+	FMT, encoding/base32, encoding/base64
 	< encoding/ascii85, encoding/csv, encoding/gob, encoding/hex,
 	  encoding/json, encoding/pem, encoding/xml, mime;
 
 	# hashes
 	io
 	< hash
-	< hash/adler32, hash/crc32, hash/crc64, hash/fnv;
-
-	# slices depends on unsafe for overlapping check, cmp for comparison
-	# semantics, and math/bits for # calculating bitlength of numbers.
-	unsafe, cmp, math/bits
-	< slices;
+	< hash/adler32, hash/crc32, hash/crc64, hash/fnv, hash/maphash;
 
 	# math/big
 	FMT, encoding/binary, math/rand
@@ -234,7 +244,7 @@ var depsRules = `
 
 	# compression
 	FMT, encoding/binary, hash/adler32, hash/crc32
-	< compress/bzip2, compress/flate, compress/lzw, internal/zstd
+	< compress/bzip2, compress/flate, compress/lzw
 	< archive/zip, compress/gzip, compress/zlib;
 
 	# templates
@@ -259,7 +269,7 @@ var depsRules = `
 	< index/suffixarray;
 
 	# executable parsing
-	FMT, encoding/binary, compress/zlib, internal/saferio, internal/zstd
+	FMT, encoding/binary, compress/zlib
 	< runtime/debug
 	< debug/dwarf
 	< debug/elf, debug/gosym, debug/macho, debug/pe, debug/plan9obj, internal/xcoff
@@ -271,36 +281,29 @@ var depsRules = `
 	< go/token
 	< go/scanner
 	< go/ast
-	< go/internal/typeparams;
+	< go/internal/typeparams
+	< go/parser;
 
 	FMT
 	< go/build/constraint, go/doc/comment;
 
-	go/internal/typeparams, go/build/constraint
-	< go/parser;
-
-	go/doc/comment, go/parser, text/tabwriter
+	go/build/constraint, go/doc/comment, go/parser, text/tabwriter
 	< go/printer
 	< go/format;
-
-	math/big, go/token
-	< go/constant;
-
-	container/heap, go/constant, go/parser, internal/types/errors
-	< go/types;
-
-	# The vast majority of standard library packages should not be resorting to regexp.
-	# go/types is a good chokepoint. It shouldn't use regexp, nor should anything
-	# that is low-enough level to be used by go/types.
-	regexp !< go/types;
 
 	go/doc/comment, go/parser, internal/lazyregexp, text/template
 	< go/doc;
 
+	math/big, go/token
+	< go/constant;
+
+	container/heap, go/constant, go/parser, regexp
+	< go/types;
+
 	FMT, internal/goexperiment
 	< internal/buildcfg;
 
-	go/build/constraint, go/doc, go/parser, internal/buildcfg, internal/goroot, internal/goversion, internal/platform
+	go/build/constraint, go/doc, go/parser, internal/buildcfg, internal/goroot, internal/goversion
 	< go/build;
 
 	# databases
@@ -324,16 +327,11 @@ var depsRules = `
 	< C
 	< runtime/cgo
 	< CGO
-	< runtime/msan, runtime/asan;
-
-	# runtime/race
-	NONE < runtime/race/internal/amd64v1;
-	NONE < runtime/race/internal/amd64v3;
-	CGO, runtime/race/internal/amd64v1, runtime/race/internal/amd64v3 < runtime/race;
+	< runtime/race, runtime/msan, runtime/asan;
 
 	# Bulk of the standard library must not use cgo.
 	# The prohibition stops at net and os/user.
-	C !< fmt, go/types, CRYPTO-MATH, log/slog;
+	C !< fmt, go/types, CRYPTO-MATH;
 
 	CGO, OS
 	< plugin;
@@ -385,24 +383,13 @@ var depsRules = `
 	< NET;
 
 	# logging - most packages should not import; http and up is allowed
-	FMT, log/internal
+	FMT
 	< log;
 
-	log, log/slog !< crypto/tls, database/sql, go/importer, testing;
+	log !< crypto/tls, database/sql, go/importer, testing;
 
 	FMT, log, net
 	< log/syslog;
-
-	RUNTIME
-	< log/slog/internal, log/slog/internal/buffer;
-
-	FMT,
-	encoding, encoding/json,
-	log, log/internal,
-	log/slog/internal, log/slog/internal/buffer,
-	slices
-	< log/slog
-	< log/slog/internal/slogtest, log/slog/internal/benchmarks;
 
 	NET, log
 	< net/mail;
@@ -420,51 +407,33 @@ var depsRules = `
 	hash, embed
 	< crypto
 	< crypto/subtle
-	< crypto/internal/alias
+	< crypto/internal/subtle
+	< crypto/internal/nistec/fiat
+	< crypto/internal/nistec
+	< crypto/internal/edwards25519/field, golang.org/x/crypto/curve25519/internal/field
+	< crypto/internal/edwards25519
 	< crypto/cipher;
 
 	crypto/cipher,
 	crypto/internal/boring/bcache
 	< crypto/internal/boring
-	< crypto/boring;
-
-	crypto/internal/alias
-	< crypto/internal/randutil
-	< crypto/internal/nistec/fiat
-	< crypto/internal/nistec
-	< crypto/internal/edwards25519/field
-	< crypto/internal/edwards25519;
-
-	crypto/boring
+	< crypto/boring
 	< crypto/aes, crypto/des, crypto/hmac, crypto/md5, crypto/rc4,
-	  crypto/sha1, crypto/sha256, crypto/sha512;
-
-	crypto/boring, crypto/internal/edwards25519/field
-	< crypto/ecdh;
-
-	crypto/aes,
-	crypto/des,
-	crypto/ecdh,
-	crypto/hmac,
-	crypto/internal/edwards25519,
-	crypto/md5,
-	crypto/rc4,
-	crypto/sha1,
-	crypto/sha256,
-	crypto/sha512
+	  crypto/sha1, crypto/sha256, crypto/sha512
 	< CRYPTO;
 
 	CGO, fmt, net !< CRYPTO;
 
 	# CRYPTO-MATH is core bignum-based crypto - no cgo, net; fmt now ok.
-	CRYPTO, FMT, math/big
+	CRYPTO, FMT, math/big, embed
 	< crypto/internal/boring/bbig
+	< crypto/internal/randutil
 	< crypto/rand
 	< crypto/ed25519
 	< encoding/asn1
 	< golang.org/x/crypto/cryptobyte/asn1
 	< golang.org/x/crypto/cryptobyte
-	< crypto/internal/bigmod
+	< golang.org/x/crypto/curve25519
 	< crypto/dsa, crypto/elliptic, crypto/rsa
 	< crypto/ecdsa
 	< CRYPTO-MATH;
@@ -473,7 +442,6 @@ var depsRules = `
 
 	# TLS, Prince of Dependencies.
 	CRYPTO-MATH, NET, container/list, encoding/hex, encoding/pem
-	< golang.org/x/crypto/internal/alias
 	< golang.org/x/crypto/internal/subtle
 	< golang.org/x/crypto/chacha20
 	< golang.org/x/crypto/internal/poly1305
@@ -498,9 +466,6 @@ var depsRules = `
 
 	crypto/tls
 	< net/smtp;
-
-	crypto/rand
-	< hash/maphash; # for purego implementation
 
 	# HTTP, King of Dependencies.
 
@@ -550,7 +515,7 @@ var depsRules = `
 	FMT, compress/gzip, encoding/binary, text/tabwriter
 	< runtime/pprof;
 
-	OS, compress/gzip, internal/lazyregexp
+	OS, compress/gzip, regexp
 	< internal/profile;
 
 	html, internal/profile, net/http, runtime/pprof, runtime/trace
@@ -570,9 +535,6 @@ var depsRules = `
 	< testing/iotest
 	< testing/fstest;
 
-	log/slog
-	< testing/slogtest;
-
 	FMT, flag, math/rand
 	< testing/quick;
 
@@ -586,14 +548,14 @@ var depsRules = `
 	internal/fuzz, internal/testlog, runtime/pprof, regexp
 	< testing/internal/testdeps;
 
-	OS, flag, testing, internal/cfg, internal/platform, internal/goroot
+	OS, flag, testing, internal/cfg
 	< internal/testenv;
 
 	OS, encoding/base64
 	< internal/obscuretestdata;
 
 	CGO, OS, fmt
-	< internal/testpty;
+	< os/signal/internal/pty;
 
 	NET, testing, math/rand
 	< golang.org/x/net/nettest;
@@ -606,30 +568,6 @@ var depsRules = `
 
 	FMT
 	< internal/diff, internal/txtar;
-
-	FMT, crypto/md5, encoding/binary, regexp, sort, text/tabwriter, unsafe,
-	internal/coverage, internal/coverage/uleb128
-	< internal/coverage/cmerge,
-	  internal/coverage/pods,
-	  internal/coverage/slicereader,
-	  internal/coverage/slicewriter;
-
-	internal/coverage/slicereader, internal/coverage/slicewriter
-	< internal/coverage/stringtab
-	< internal/coverage/decodecounter, internal/coverage/decodemeta,
-	  internal/coverage/encodecounter, internal/coverage/encodemeta;
-
-	internal/coverage/cmerge
-	< internal/coverage/cformat;
-
-    encoding/json,
-	runtime/debug,
-	internal/coverage/calloc,
-	internal/coverage/cformat,
-	internal/coverage/decodecounter, internal/coverage/decodemeta,
-	internal/coverage/encodecounter, internal/coverage/encodemeta,
-	internal/coverage/pods
-	< runtime/coverage;
 `
 
 // listStdPkgs returns the same list of packages as "go list std".
@@ -688,10 +626,11 @@ func TestDependencies(t *testing.T) {
 		if sawImport[pkg] == nil {
 			sawImport[pkg] = map[string]bool{}
 		}
+		ok := policy[pkg]
 		var bad []string
 		for _, imp := range imports {
 			sawImport[pkg][imp] = true
-			if !policy.HasEdge(pkg, imp) {
+			if !ok[imp] {
 				bad = append(bad, imp)
 			}
 		}
@@ -760,12 +699,187 @@ func findImports(pkg string) ([]string, error) {
 }
 
 // depsPolicy returns a map m such that m[p][d] == true when p can import d.
-func depsPolicy(t *testing.T) *dag.Graph {
-	g, err := dag.Parse(depsRules)
-	if err != nil {
-		t.Fatal(err)
+func depsPolicy(t *testing.T) map[string]map[string]bool {
+	allowed := map[string]map[string]bool{"NONE": {}}
+	disallowed := [][2][]string{}
+
+	parseDepsRules(t, func(deps []string, op string, users []string) {
+		if op == "!<" {
+			disallowed = append(disallowed, [2][]string{deps, users})
+			return
+		}
+		for _, u := range users {
+			if allowed[u] != nil {
+				t.Errorf("multiple deps lists for %s", u)
+			}
+			allowed[u] = make(map[string]bool)
+			for _, d := range deps {
+				if allowed[d] == nil {
+					t.Errorf("use of %s before its deps list", d)
+				}
+				allowed[u][d] = true
+			}
+		}
+	})
+
+	// Check for missing deps info.
+	for _, deps := range allowed {
+		for d := range deps {
+			if allowed[d] == nil {
+				t.Errorf("missing deps list for %s", d)
+			}
+		}
 	}
-	return g
+
+	// Complete transitive allowed deps.
+	for k := range allowed {
+		for i := range allowed {
+			for j := range allowed {
+				if i != k && k != j && allowed[i][k] && allowed[k][j] {
+					if i == j {
+						// Can only happen along with a "use of X before deps" error above,
+						// but this error is more specific - it makes clear that reordering the
+						// rules will not be enough to fix the problem.
+						t.Errorf("deps policy cycle: %s < %s < %s", j, k, i)
+					}
+					allowed[i][j] = true
+				}
+			}
+		}
+	}
+
+	// Check negative assertions against completed allowed deps.
+	for _, bad := range disallowed {
+		deps, users := bad[0], bad[1]
+		for _, d := range deps {
+			for _, u := range users {
+				if allowed[u][d] {
+					t.Errorf("deps policy incorrect: assertion failed: %s !< %s", d, u)
+				}
+			}
+		}
+	}
+
+	if t.Failed() {
+		t.FailNow()
+	}
+
+	return allowed
+}
+
+// parseDepsRules parses depsRules, calling save(deps, op, users)
+// for each deps < users or deps !< users rule
+// (op is "<" or "!<").
+func parseDepsRules(t *testing.T, save func(deps []string, op string, users []string)) {
+	p := &depsParser{t: t, lineno: 1, text: depsRules}
+
+	var prev []string
+	var op string
+	for {
+		list, tok := p.nextList()
+		if tok == "" {
+			if prev == nil {
+				break
+			}
+			p.syntaxError("unexpected EOF")
+		}
+		if prev != nil {
+			save(prev, op, list)
+		}
+		prev = list
+		if tok == ";" {
+			prev = nil
+			op = ""
+			continue
+		}
+		if tok != "<" && tok != "!<" {
+			p.syntaxError("missing <")
+		}
+		op = tok
+	}
+}
+
+// A depsParser parses the depsRules syntax described above.
+type depsParser struct {
+	t        *testing.T
+	lineno   int
+	lastWord string
+	text     string
+}
+
+// syntaxError reports a parsing error.
+func (p *depsParser) syntaxError(msg string) {
+	p.t.Fatalf("deps:%d: syntax error: %s near %s", p.lineno, msg, p.lastWord)
+}
+
+// nextList parses and returns a comma-separated list of names.
+func (p *depsParser) nextList() (list []string, token string) {
+	for {
+		tok := p.nextToken()
+		switch tok {
+		case "":
+			if len(list) == 0 {
+				return nil, ""
+			}
+			fallthrough
+		case ",", "<", "!<", ";":
+			p.syntaxError("bad list syntax")
+		}
+		list = append(list, tok)
+
+		tok = p.nextToken()
+		if tok != "," {
+			return list, tok
+		}
+	}
+}
+
+// nextToken returns the next token in the deps rules,
+// one of ";" "," "<" "!<" or a name.
+func (p *depsParser) nextToken() string {
+	for {
+		if p.text == "" {
+			return ""
+		}
+		switch p.text[0] {
+		case ';', ',', '<':
+			t := p.text[:1]
+			p.text = p.text[1:]
+			return t
+
+		case '!':
+			if len(p.text) < 2 || p.text[1] != '<' {
+				p.syntaxError("unexpected token !")
+			}
+			p.text = p.text[2:]
+			return "!<"
+
+		case '#':
+			i := strings.Index(p.text, "\n")
+			if i < 0 {
+				i = len(p.text)
+			}
+			p.text = p.text[i:]
+			continue
+
+		case '\n':
+			p.lineno++
+			fallthrough
+		case ' ', '\t':
+			p.text = p.text[1:]
+			continue
+
+		default:
+			i := strings.IndexAny(p.text, "!;,<#\n \t")
+			if i < 0 {
+				i = len(p.text)
+			}
+			t := p.text[:i]
+			p.text = p.text[i:]
+			p.lastWord = t
+			return t
+		}
+	}
 }
 
 // TestStdlibLowercase tests that all standard library package names are

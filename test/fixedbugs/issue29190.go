@@ -16,9 +16,9 @@ const maxInt = int(^uint(0) >> 1)
 
 func main() {
 	s := make([]T, maxInt)
-	shouldPanic("len out of range", func() { s = append(s, T{}) })
+	shouldPanic("cap out of range", func() { s = append(s, T{}) })
 	var oneElem = make([]T, 1)
-	shouldPanic("len out of range", func() { s = append(s, oneElem...) })
+	shouldPanic("cap out of range", func() { s = append(s, oneElem...) })
 }
 
 func shouldPanic(str string, f func()) {

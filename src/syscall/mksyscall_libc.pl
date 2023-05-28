@@ -145,13 +145,11 @@ while(<>) {
 	$sysname =~ y/A-Z/a-z/; # All libc functions are lowercase.
 
 	# Runtime import of function to allow cross-platform builds.
-	if($dynimports !~ /\s+${sysvarname}\s+/) {
-		$dynimports .= "//go:cgo_import_dynamic ${sysvarname} ${sysname} \"$modname\"\n";
-		# Link symbol to proc address variable.
-		$linknames .= "//go:linkname ${sysvarname} ${sysvarname}\n";
-		# Library proc address variable.
-		push @vars, $sysvarname;
-	}
+	$dynimports .= "//go:cgo_import_dynamic ${sysvarname} ${sysname} \"$modname\"\n";
+	# Link symbol to proc address variable.
+	$linknames .= "//go:linkname ${sysvarname} ${sysvarname}\n";
+	# Library proc address variable.
+	push @vars, $sysvarname;
 
 	# Go function header.
 	$out = join(', ', @out);

@@ -6,7 +6,6 @@
 package envcmd
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,7 +17,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"cmd/go/internal/base"
@@ -59,8 +57,6 @@ For more about environment variables, see 'go help environment'.
 
 func init() {
 	CmdEnv.Run = runEnv // break init cycle
-	base.AddChdirFlag(&CmdEnv.Flag)
-	base.AddBuildFlagsNX(&CmdEnv.Flag)
 }
 
 var (
@@ -100,8 +96,7 @@ func MkEnv() []cfg.EnvVar {
 		{Name: "GOROOT", Value: cfg.GOROOT},
 		{Name: "GOSUMDB", Value: cfg.GOSUMDB},
 		{Name: "GOTMPDIR", Value: cfg.Getenv("GOTMPDIR")},
-		{Name: "GOTOOLCHAIN", Value: cfg.Getenv("GOTOOLCHAIN")},
-		{Name: "GOTOOLDIR", Value: build.ToolDir},
+		{Name: "GOTOOLDIR", Value: base.ToolDir},
 		{Name: "GOVCS", Value: cfg.GOVCS},
 		{Name: "GOVERSION", Value: runtime.Version()},
 	}
@@ -152,9 +147,6 @@ func findEnv(env []cfg.EnvVar, name string) string {
 			return e.Value
 		}
 	}
-	if cfg.CanGetenv(name) {
-		return cfg.Getenv(name)
-	}
 	return ""
 }
 
@@ -183,11 +175,6 @@ func ExtraEnvVars() []cfg.EnvVar {
 // but are costly to evaluate.
 func ExtraEnvVarsCostly() []cfg.EnvVar {
 	b := work.NewBuilder("")
-	defer func() {
-		if err := b.Close(); err != nil {
-			base.Fatalf("go: %v", err)
-		}
-	}()
 
 	cppflags, cflags, cxxflags, fflags, ldflags, err := b.CFlags(&load.Package{})
 	if err != nil {
@@ -285,7 +272,6 @@ func runEnv(ctx context.Context, cmd *base.Command, args []string) {
 		}
 	}
 	if needCostly {
-		work.BuildInit()
 		env = append(env, ExtraEnvVarsCostly()...)
 	}
 
@@ -326,10 +312,11 @@ func runEnvW(args []string) {
 	}
 	add := make(map[string]string)
 	for _, arg := range args {
-		key, val, found := strings.Cut(arg, "=")
-		if !found {
+		i := strings.Index(arg, "=")
+		if i < 0 {
 			base.Fatalf("go: arguments must be KEY=VALUE: invalid argument: %s", arg)
 		}
+		key, val := arg[:i], arg[i+1:]
 		if err := checkEnvWrite(key, val); err != nil {
 			base.Fatalf("go: %v", err)
 		}
@@ -419,12 +406,9 @@ func checkBuildConfig(add map[string]string, del map[string]bool) error {
 func PrintEnv(w io.Writer, env []cfg.EnvVar) {
 	for _, e := range env {
 		if e.Name != "TERM" {
-			if runtime.GOOS != "plan9" && bytes.Contains([]byte(e.Value), []byte{0}) {
-				base.Fatalf("go: internal error: encountered null byte in environment variable %s on non-plan9 platform", e.Name)
-			}
 			switch runtime.GOOS {
 			default:
-				fmt.Fprintf(w, "%s=%s\n", e.Name, shellQuote(e.Value))
+				fmt.Fprintf(w, "%s=\"%s\"\n", e.Name, e.Value)
 			case "plan9":
 				if strings.IndexByte(e.Value, '\x00') < 0 {
 					fmt.Fprintf(w, "%s='%s'\n", e.Name, strings.ReplaceAll(e.Value, "'", "''"))
@@ -435,65 +419,15 @@ func PrintEnv(w io.Writer, env []cfg.EnvVar) {
 						if x > 0 {
 							fmt.Fprintf(w, " ")
 						}
-						fmt.Fprintf(w, "'%s'", strings.ReplaceAll(s, "'", "''"))
+						fmt.Fprintf(w, "%s", s)
 					}
 					fmt.Fprintf(w, ")\n")
 				}
 			case "windows":
-				if hasNonGraphic(e.Value) {
-					base.Errorf("go: stripping unprintable or unescapable characters from %%%q%%", e.Name)
-				}
-				fmt.Fprintf(w, "set %s=%s\n", e.Name, batchEscape(e.Value))
+				fmt.Fprintf(w, "set %s=%s\n", e.Name, e.Value)
 			}
 		}
 	}
-}
-
-func hasNonGraphic(s string) bool {
-	for _, c := range []byte(s) {
-		if c == '\r' || c == '\n' || (!unicode.IsGraphic(rune(c)) && !unicode.IsSpace(rune(c))) {
-			return true
-		}
-	}
-	return false
-}
-
-func shellQuote(s string) string {
-	var b bytes.Buffer
-	b.WriteByte('\'')
-	for _, x := range []byte(s) {
-		if x == '\'' {
-			// Close the single quoted string, add an escaped single quote,
-			// and start another single quoted string.
-			b.WriteString(`'\''`)
-		} else {
-			b.WriteByte(x)
-		}
-	}
-	b.WriteByte('\'')
-	return b.String()
-}
-
-func batchEscape(s string) string {
-	var b bytes.Buffer
-	for _, x := range []byte(s) {
-		if x == '\r' || x == '\n' || (!unicode.IsGraphic(rune(x)) && !unicode.IsSpace(rune(x))) {
-			b.WriteRune(unicode.ReplacementChar)
-			continue
-		}
-		switch x {
-		case '%':
-			b.WriteString("%%")
-		case '<', '>', '|', '&', '^':
-			// These are special characters that need to be escaped with ^. See
-			// https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/set_1.
-			b.WriteByte('^')
-			b.WriteByte(x)
-		default:
-			b.WriteByte(x)
-		}
-	}
-	return b.String()
 }
 
 func printEnvAsJSON(env []cfg.EnvVar) {
@@ -513,8 +447,8 @@ func printEnvAsJSON(env []cfg.EnvVar) {
 
 func getOrigEnv(key string) string {
 	for _, v := range cfg.OrigEnv {
-		if v, found := strings.CutPrefix(v, key+"="); found {
-			return v
+		if strings.HasPrefix(v, key+"=") {
+			return strings.TrimPrefix(v, key+"=")
 		}
 	}
 	return ""
@@ -529,7 +463,6 @@ func checkEnvWrite(key, val string) error {
 	}
 
 	// To catch typos and the like, check that we know the variable.
-	// If it's already in the env file, we assume it's known.
 	if !cfg.CanGetenv(key) {
 		return fmt.Errorf("unknown go command variable %s", key)
 	}
@@ -583,29 +516,22 @@ func checkEnvWrite(key, val string) error {
 	return nil
 }
 
-func readEnvFileLines(mustExist bool) []string {
+func updateEnvFile(add map[string]string, del map[string]bool) {
 	file, err := cfg.EnvFile()
 	if file == "" {
-		if mustExist {
-			base.Fatalf("go: cannot find go env config: %v", err)
-		}
-		return nil
+		base.Fatalf("go: cannot find go env config: %v", err)
 	}
 	data, err := os.ReadFile(file)
-	if err != nil && (!os.IsNotExist(err) || mustExist) {
+	if err != nil && (!os.IsNotExist(err) || len(add) == 0) {
 		base.Fatalf("go: reading go env config: %v", err)
 	}
+
 	lines := strings.SplitAfter(string(data), "\n")
 	if lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
 	} else {
 		lines[len(lines)-1] += "\n"
 	}
-	return lines
-}
-
-func updateEnvFile(add map[string]string, del map[string]bool) {
-	lines := readEnvFileLines(len(add) == 0)
 
 	// Delete all but last copy of any duplicated variables,
 	// since the last copy is the one that takes effect.
@@ -648,11 +574,7 @@ func updateEnvFile(add map[string]string, del map[string]bool) {
 		}
 	}
 
-	file, err := cfg.EnvFile()
-	if file == "" {
-		base.Fatalf("go: cannot find go env config: %v", err)
-	}
-	data := []byte(strings.Join(lines, ""))
+	data = []byte(strings.Join(lines, ""))
 	err = os.WriteFile(file, data, 0666)
 	if err != nil {
 		// Try creating directory.

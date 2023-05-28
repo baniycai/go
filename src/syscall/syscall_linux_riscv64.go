@@ -6,21 +6,20 @@ package syscall
 
 import "unsafe"
 
-const (
-	_SYS_setgroups  = SYS_SETGROUPS
-	_SYS_clone3     = 435
-	_SYS_faccessat2 = 439
-)
+const _SYS_setgroups = SYS_SETGROUPS
+
+func EpollCreate(size int) (fd int, err error) {
+	if size <= 0 {
+		return -1, EINVAL
+	}
+	return EpollCreate1(0)
+}
 
 //sys	EpollWait(epfd int, events []EpollEvent, msec int) (n int, err error) = SYS_EPOLL_PWAIT
 //sys	Fchown(fd int, uid int, gid int) (err error)
 //sys	Fstat(fd int, stat *Stat_t) (err error)
+//sys	Fstatat(fd int, path string, stat *Stat_t, flags int) (err error)
 //sys	fstatat(dirfd int, path string, stat *Stat_t, flags int) (err error)
-
-func Fstatat(fd int, path string, stat *Stat_t, flags int) error {
-	return fstatat(fd, path, stat, flags)
-}
-
 //sys	Fstatfs(fd int, buf *Statfs_t) (err error)
 //sys	Ftruncate(fd int, length int64) (err error)
 //sysnb	Getegid() (egid int)
@@ -36,7 +35,7 @@ func Fstatat(fd int, path string, stat *Stat_t, flags int) error {
 //sys	sendfile(outfd int, infd int, offset *int64, count int) (written int, err error)
 //sys	Setfsgid(gid int) (err error)
 //sys	Setfsuid(uid int) (err error)
-//sysnb	setrlimit(resource int, rlim *Rlimit) (err error) = SYS_SETRLIMIT
+//sysnb	Setrlimit(resource int, rlim *Rlimit) (err error)
 //sys	Shutdown(fd int, how int) (err error)
 //sys	Splice(rfd int, roff *int64, wfd int, woff *int64, len int, flags int) (n int64, err error)
 
@@ -45,7 +44,7 @@ func Renameat(olddirfd int, oldpath string, newdirfd int, newpath string) (err e
 }
 
 func Stat(path string, stat *Stat_t) (err error) {
-	return fstatat(_AT_FDCWD, path, stat, 0)
+	return Fstatat(_AT_FDCWD, path, stat, 0)
 }
 
 func Lchown(path string, uid int, gid int) (err error) {
@@ -53,7 +52,7 @@ func Lchown(path string, uid int, gid int) (err error) {
 }
 
 func Lstat(path string, stat *Stat_t) (err error) {
-	return fstatat(_AT_FDCWD, path, stat, _AT_SYMLINK_NOFOLLOW)
+	return Fstatat(_AT_FDCWD, path, stat, _AT_SYMLINK_NOFOLLOW)
 }
 
 //sys	Statfs(path string, buf *Statfs_t) (err error)
@@ -143,12 +142,6 @@ func utimes(path string, tv *[2]Timeval) (err error) {
 	return utimensat(_AT_FDCWD, path, (*[2]Timespec)(unsafe.Pointer(&ts[0])), 0)
 }
 
-//go:nosplit
-func rawSetrlimit(resource int, rlim *Rlimit) Errno {
-	_, _, errno := RawSyscall(SYS_SETRLIMIT, uintptr(resource), uintptr(unsafe.Pointer(rlim)), 0)
-	return errno
-}
-
 func (r *PtraceRegs) PC() uint64 { return r.Pc }
 
 func (r *PtraceRegs) SetPC(pc uint64) { r.Pc = pc }
@@ -175,3 +168,5 @@ func Pause() error {
 	_, err := ppoll(nil, 0, nil, nil)
 	return err
 }
+
+func rawVforkSyscall(trap, a1 uintptr) (r1 uintptr, err Errno)

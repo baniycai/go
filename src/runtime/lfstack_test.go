@@ -16,17 +16,6 @@ type MyNode struct {
 	data int
 }
 
-// allocMyNode allocates nodes that are stored in an lfstack
-// outside the Go heap.
-// We require lfstack objects to live outside the heap so that
-// checkptr passes on the unsafe shenanigans used.
-func allocMyNode(data int) *MyNode {
-	n := (*MyNode)(PersistentAlloc(unsafe.Sizeof(MyNode{})))
-	LFNodeValidate(&n.LFNode)
-	n.data = data
-	return n
-}
-
 func fromMyNode(node *MyNode) *LFNode {
 	return (*LFNode)(unsafe.Pointer(node))
 }
@@ -41,17 +30,22 @@ func TestLFStack(t *testing.T) {
 	stack := new(uint64)
 	global = stack // force heap allocation
 
+	// Need to keep additional references to nodes, the stack is not all that type-safe.
+	var nodes []*MyNode
+
 	// Check the stack is initially empty.
 	if LFStackPop(stack) != nil {
 		t.Fatalf("stack is not empty")
 	}
 
 	// Push one element.
-	node := allocMyNode(42)
+	node := &MyNode{data: 42}
+	nodes = append(nodes, node)
 	LFStackPush(stack, fromMyNode(node))
 
 	// Push another.
-	node = allocMyNode(43)
+	node = &MyNode{data: 43}
+	nodes = append(nodes, node)
 	LFStackPush(stack, fromMyNode(node))
 
 	// Pop one element.
@@ -81,6 +75,8 @@ func TestLFStack(t *testing.T) {
 	}
 }
 
+var stress []*MyNode
+
 func TestLFStackStress(t *testing.T) {
 	const K = 100
 	P := 4 * GOMAXPROCS(-1)
@@ -90,11 +86,15 @@ func TestLFStackStress(t *testing.T) {
 	}
 	// Create 2 stacks.
 	stacks := [2]*uint64{new(uint64), new(uint64)}
+	// Need to keep additional references to nodes,
+	// the lock-free stack is not type-safe.
+	stress = nil
 	// Push K elements randomly onto the stacks.
 	sum := 0
 	for i := 0; i < K; i++ {
 		sum += i
-		node := allocMyNode(i)
+		node := &MyNode{data: i}
+		stress = append(stress, node)
 		LFStackPush(stacks[i%2], fromMyNode(node))
 	}
 	c := make(chan bool, P)
@@ -134,4 +134,7 @@ func TestLFStackStress(t *testing.T) {
 	if sum2 != sum {
 		t.Fatalf("Wrong sum %d/%d", sum2, sum)
 	}
+
+	// Let nodes be collected now.
+	stress = nil
 }

@@ -12,6 +12,8 @@
 
 #define CLOCK_REALTIME		0
 #define CLOCK_MONOTONIC		3
+#define FD_CLOEXEC		1
+#define F_SETFD			2
 
 #define SYS_exit			1
 #define SYS_read			3
@@ -455,15 +457,15 @@ TEXT runtime·kevent(SB),NOSPLIT,$0
 	MOVL	AX, ret+24(FP)
 	RET
 
-// func fcntl(fd, cmd, arg int32) (int32, int32)
-TEXT runtime·fcntl(SB),NOSPLIT,$-4
+// int32 runtime·closeonexec(int32 fd)
+TEXT runtime·closeonexec(SB),NOSPLIT,$32
 	MOVL	$SYS_fcntl, AX
+	// 0(SP) is where the caller PC would be; kernel skips it
+	MOVL	fd+0(FP), BX
+	MOVL	BX, 4(SP)	// fd
+	MOVL	$F_SETFD, 8(SP)
+	MOVL	$FD_CLOEXEC, 12(SP)
 	INT	$0x80
-	JAE	noerr
-	MOVL	$-1, ret+12(FP)
-	MOVL	AX, errno+16(FP)
-	RET
-noerr:
-	MOVL	AX, ret+12(FP)
-	MOVL	$0, errno+16(FP)
+	JAE	2(PC)
+	NEGL	AX
 	RET

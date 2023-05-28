@@ -12,7 +12,7 @@ package p
 // and runs in a fraction of a second without it.
 // 10 seconds (-t 10 above) should be plenty if the code is working.
 
-var x = f() + z() // ERROR "initialization cycle"
+var x = f() + z() // ERROR "initialization loop"
 
 func f() int { return a1() + a2() + a3() + a4() + a5() + a6() + a7() }
 func z() int { return x }

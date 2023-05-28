@@ -385,7 +385,7 @@ func TestTypedContent(t *testing.T) {
 		tmpl := Must(New("x").Parse(test.input))
 		pre := strings.Index(test.input, "{{.}}")
 		post := len(test.input) - (pre + 5)
-		var b strings.Builder
+		var b bytes.Buffer
 		for i, x := range data {
 			b.Reset()
 			if err := tmpl.Execute(&b, x); err != nil {
@@ -419,7 +419,7 @@ func (s *errorer) Error() string {
 
 func TestStringer(t *testing.T) {
 	s := &myStringer{3}
-	b := new(strings.Builder)
+	b := new(bytes.Buffer)
 	tmpl := Must(New("x").Parse("{{.}}"))
 	if err := tmpl.Execute(b, s); err != nil {
 		t.Fatal(err)

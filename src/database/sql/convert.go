@@ -7,7 +7,6 @@
 package sql
 
 import (
-	"bytes"
 	"database/sql/driver"
 	"errors"
 	"fmt"
@@ -253,13 +252,13 @@ func convertAssignRows(dest, src any, rows *Rows) error {
 			if d == nil {
 				return errNilPtr
 			}
-			*d = bytes.Clone(s)
+			*d = cloneBytes(s)
 			return nil
 		case *[]byte:
 			if d == nil {
 				return errNilPtr
 			}
-			*d = bytes.Clone(s)
+			*d = cloneBytes(s)
 			return nil
 		case *RawBytes:
 			if d == nil {
@@ -402,7 +401,7 @@ func convertAssignRows(dest, src any, rows *Rows) error {
 	if sv.IsValid() && sv.Type().AssignableTo(dv.Type()) {
 		switch b := src.(type) {
 		case []byte:
-			dv.Set(reflect.ValueOf(bytes.Clone(b)))
+			dv.Set(reflect.ValueOf(cloneBytes(b)))
 		default:
 			dv.Set(sv)
 		}
@@ -422,7 +421,7 @@ func convertAssignRows(dest, src any, rows *Rows) error {
 	switch dv.Kind() {
 	case reflect.Pointer:
 		if src == nil {
-			dv.SetZero()
+			dv.Set(reflect.Zero(dv.Type()))
 			return nil
 		}
 		dv.Set(reflect.New(dv.Type().Elem()))
@@ -485,6 +484,15 @@ func strconvErr(err error) error {
 		return ne.Err
 	}
 	return err
+}
+
+func cloneBytes(b []byte) []byte {
+	if b == nil {
+		return nil
+	}
+	c := make([]byte, len(b))
+	copy(c, b)
+	return c
 }
 
 func asString(src any) string {

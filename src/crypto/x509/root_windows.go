@@ -5,9 +5,7 @@
 package x509
 
 import (
-	"bytes"
 	"errors"
-	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -71,14 +69,15 @@ func extractSimpleChain(simpleChain **syscall.CertSimpleChain, count int) (chain
 		return nil, errors.New("x509: invalid simple chain")
 	}
 
-	simpleChains := unsafe.Slice(simpleChain, count)
+	simpleChains := (*[1 << 20]*syscall.CertSimpleChain)(unsafe.Pointer(simpleChain))[:count:count]
 	lastChain := simpleChains[count-1]
-	elements := unsafe.Slice(lastChain.Elements, lastChain.NumElements)
+	elements := (*[1 << 20]*syscall.CertChainElement)(unsafe.Pointer(lastChain.Elements))[:lastChain.NumElements:lastChain.NumElements]
 	for i := 0; i < int(lastChain.NumElements); i++ {
 		// Copy the buf, since ParseCertificate does not create its own copy.
 		cert := elements[i].CertContext
-		encodedCert := unsafe.Slice(cert.EncodedCert, cert.Length)
-		buf := bytes.Clone(encodedCert)
+		encodedCert := (*[1 << 20]byte)(unsafe.Pointer(cert.EncodedCert))[:cert.Length:cert.Length]
+		buf := make([]byte, cert.Length)
+		copy(buf, encodedCert)
 		parsedCert, err := ParseCertificate(buf)
 		if err != nil {
 			return nil, err
@@ -110,7 +109,7 @@ func checkChainTrustStatus(c *Certificate, chainCtx *syscall.CertChainContext) e
 // checkChainSSLServerPolicy checks that the certificate chain in chainCtx is valid for
 // use as a certificate chain for a SSL/TLS server.
 func checkChainSSLServerPolicy(c *Certificate, chainCtx *syscall.CertChainContext, opts *VerifyOptions) error {
-	servernamep, err := syscall.UTF16PtrFromString(strings.TrimSuffix(opts.DNSName, "."))
+	servernamep, err := syscall.UTF16PtrFromString(opts.DNSName)
 	if err != nil {
 		return err
 	}
@@ -259,7 +258,8 @@ func (c *Certificate) systemVerify(opts *VerifyOptions) (chains [][]*Certificate
 	}
 
 	if lqCtxCount := topCtx.LowerQualityChainCount; lqCtxCount > 0 {
-		lqCtxs := unsafe.Slice(topCtx.LowerQualityChains, lqCtxCount)
+		lqCtxs := (*[1 << 20]*syscall.CertChainContext)(unsafe.Pointer(topCtx.LowerQualityChains))[:lqCtxCount:lqCtxCount]
+
 		for _, ctx := range lqCtxs {
 			chain, err := verifyChain(c, ctx, opts)
 			if err == nil {

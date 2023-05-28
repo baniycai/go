@@ -567,7 +567,10 @@ func (p *Parser) atRegisterExtension() bool {
 		return false
 	}
 	// R1.xxx
-	return p.peek() == '.'
+	if p.peek() == '.' {
+		return true
+	}
+	return false
 }
 
 // registerReference parses a register given either the name, R10, or a parenthesized form, SPR(10).
@@ -972,13 +975,13 @@ func (p *Parser) registerIndirect(a *obj.Addr, prefix rune) {
 			return
 		}
 		if p.arch.Family == sys.PPC64 {
-			// Special form for PPC64: (R1+R2); alias for (R1)(R2).
+			// Special form for PPC64: (R1+R2); alias for (R1)(R2*1).
 			if prefix != 0 || scale != 0 {
 				p.errorf("illegal address mode for register+register")
 				return
 			}
 			a.Type = obj.TYPE_MEM
-			a.Scale = 0
+			a.Scale = 1
 			a.Index = r2
 			// Nothing may follow.
 			return
@@ -1011,10 +1014,9 @@ func (p *Parser) registerIndirect(a *obj.Addr, prefix rune) {
 				p.errorf("unimplemented two-register form")
 			}
 			a.Index = r1
-			if scale != 0 && scale != 1 && (p.arch.Family == sys.ARM64 ||
-				p.arch.Family == sys.PPC64) {
+			if scale != 0 && scale != 1 && p.arch.Family == sys.ARM64 {
 				// Support (R1)(R2) (no scaling) and (R1)(R2*1).
-				p.errorf("%s doesn't support scaled register format", p.arch.Name)
+				p.errorf("arm64 doesn't support scaled register format")
 			} else {
 				a.Scale = int16(scale)
 			}

@@ -9,7 +9,6 @@ package http
 import (
 	"errors"
 	"fmt"
-	"internal/safefilepath"
 	"io"
 	"io/fs"
 	"mime"
@@ -70,15 +69,14 @@ func mapOpenError(originalErr error, name string, sep rune, stat func(string) (f
 // Open implements FileSystem using os.Open, opening files for reading rooted
 // and relative to the directory d.
 func (d Dir) Open(name string) (File, error) {
-	path, err := safefilepath.FromFS(path.Clean("/" + name))
-	if err != nil {
-		return nil, errors.New("http: invalid or unsafe file path")
+	if filepath.Separator != '/' && strings.ContainsRune(name, filepath.Separator) {
+		return nil, errors.New("http: invalid character in file path")
 	}
 	dir := string(d)
 	if dir == "" {
 		dir = "."
 	}
-	fullName := filepath.Join(dir, path)
+	fullName := filepath.Join(dir, filepath.FromSlash(path.Clean("/"+name)))
 	f, err := os.Open(fullName)
 	if err != nil {
 		return nil, mapOpenError(err, fullName, filepath.Separator, os.Stat)
@@ -256,106 +254,87 @@ func serveContent(w ResponseWriter, r *Request, name string, modtime time.Time, 
 		Error(w, err.Error(), StatusInternalServerError)
 		return
 	}
-	if size < 0 {
-		// Should never happen but just to be sure
-		Error(w, "negative content size computed", StatusInternalServerError)
-		return
-	}
 
 	// handle Content-Range header.
 	sendSize := size
 	var sendContent io.Reader = content
-	ranges, err := parseRange(rangeReq, size)
-	switch err {
-	case nil:
-	case errNoOverlap:
-		if size == 0 {
-			// Some clients add a Range header to all requests to
-			// limit the size of the response. If the file is empty,
-			// ignore the range header and respond with a 200 rather
-			// than a 416.
-			ranges = nil
-			break
-		}
-		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", size))
-		fallthrough
-	default:
-		Error(w, err.Error(), StatusRequestedRangeNotSatisfiable)
-		return
-	}
-
-	if sumRangesSize(ranges) > size {
-		// The total number of bytes in all the ranges
-		// is larger than the size of the file by
-		// itself, so this is probably an attack, or a
-		// dumb client. Ignore the range request.
-		ranges = nil
-	}
-	switch {
-	case len(ranges) == 1:
-		// RFC 7233, Section 4.1:
-		// "If a single part is being transferred, the server
-		// generating the 206 response MUST generate a
-		// Content-Range header field, describing what range
-		// of the selected representation is enclosed, and a
-		// payload consisting of the range.
-		// ...
-		// A server MUST NOT generate a multipart response to
-		// a request for a single range, since a client that
-		// does not request multiple parts might not support
-		// multipart responses."
-		ra := ranges[0]
-		if _, err := content.Seek(ra.start, io.SeekStart); err != nil {
+	if size >= 0 {
+		ranges, err := parseRange(rangeReq, size)
+		if err != nil {
+			if err == errNoOverlap {
+				w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", size))
+			}
 			Error(w, err.Error(), StatusRequestedRangeNotSatisfiable)
 			return
 		}
-		sendSize = ra.length
-		code = StatusPartialContent
-		w.Header().Set("Content-Range", ra.contentRange(size))
-	case len(ranges) > 1:
-		sendSize = rangesMIMESize(ranges, ctype, size)
-		code = StatusPartialContent
-
-		pr, pw := io.Pipe()
-		mw := multipart.NewWriter(pw)
-		w.Header().Set("Content-Type", "multipart/byteranges; boundary="+mw.Boundary())
-		sendContent = pr
-		defer pr.Close() // cause writing goroutine to fail and exit if CopyN doesn't finish.
-		go func() {
-			for _, ra := range ranges {
-				part, err := mw.CreatePart(ra.mimeHeader(ctype, size))
-				if err != nil {
-					pw.CloseWithError(err)
-					return
-				}
-				if _, err := content.Seek(ra.start, io.SeekStart); err != nil {
-					pw.CloseWithError(err)
-					return
-				}
-				if _, err := io.CopyN(part, content, ra.length); err != nil {
-					pw.CloseWithError(err)
-					return
-				}
+		if sumRangesSize(ranges) > size {
+			// The total number of bytes in all the ranges
+			// is larger than the size of the file by
+			// itself, so this is probably an attack, or a
+			// dumb client. Ignore the range request.
+			ranges = nil
+		}
+		switch {
+		case len(ranges) == 1:
+			// RFC 7233, Section 4.1:
+			// "If a single part is being transferred, the server
+			// generating the 206 response MUST generate a
+			// Content-Range header field, describing what range
+			// of the selected representation is enclosed, and a
+			// payload consisting of the range.
+			// ...
+			// A server MUST NOT generate a multipart response to
+			// a request for a single range, since a client that
+			// does not request multiple parts might not support
+			// multipart responses."
+			ra := ranges[0]
+			if _, err := content.Seek(ra.start, io.SeekStart); err != nil {
+				Error(w, err.Error(), StatusRequestedRangeNotSatisfiable)
+				return
 			}
-			mw.Close()
-			pw.Close()
-		}()
-	}
+			sendSize = ra.length
+			code = StatusPartialContent
+			w.Header().Set("Content-Range", ra.contentRange(size))
+		case len(ranges) > 1:
+			sendSize = rangesMIMESize(ranges, ctype, size)
+			code = StatusPartialContent
 
-	w.Header().Set("Accept-Ranges", "bytes")
-	if w.Header().Get("Content-Encoding") == "" {
-		w.Header().Set("Content-Length", strconv.FormatInt(sendSize, 10))
+			pr, pw := io.Pipe()
+			mw := multipart.NewWriter(pw)
+			w.Header().Set("Content-Type", "multipart/byteranges; boundary="+mw.Boundary())
+			sendContent = pr
+			defer pr.Close() // cause writing goroutine to fail and exit if CopyN doesn't finish.
+			go func() {
+				for _, ra := range ranges {
+					part, err := mw.CreatePart(ra.mimeHeader(ctype, size))
+					if err != nil {
+						pw.CloseWithError(err)
+						return
+					}
+					if _, err := content.Seek(ra.start, io.SeekStart); err != nil {
+						pw.CloseWithError(err)
+						return
+					}
+					if _, err := io.CopyN(part, content, ra.length); err != nil {
+						pw.CloseWithError(err)
+						return
+					}
+				}
+				mw.Close()
+				pw.Close()
+			}()
+		}
+
+		w.Header().Set("Accept-Ranges", "bytes")
+		if w.Header().Get("Content-Encoding") == "" {
+			w.Header().Set("Content-Length", strconv.FormatInt(sendSize, 10))
+		}
 	}
 
 	w.WriteHeader(code)
 
-	if r.Method != MethodHead {
-		if sendSize == size {
-			// use Copy in the non-range case to make use of WriterTo if available
-			io.Copy(w, sendContent)
-		} else {
-			io.CopyN(w, sendContent, sendSize)
-		}
+	if r.Method != "HEAD" {
+		io.CopyN(w, sendContent, sendSize)
 	}
 }
 
@@ -452,7 +431,7 @@ func checkIfUnmodifiedSince(r *Request, modtime time.Time) condResult {
 	// The Last-Modified header truncates sub-second precision so
 	// the modtime needs to be truncated too.
 	modtime = modtime.Truncate(time.Second)
-	if ret := modtime.Compare(t); ret <= 0 {
+	if modtime.Before(t) || modtime.Equal(t) {
 		return condTrue
 	}
 	return condFalse
@@ -503,7 +482,7 @@ func checkIfModifiedSince(r *Request, modtime time.Time) condResult {
 	// The Last-Modified header truncates sub-second precision so
 	// the modtime needs to be truncated too.
 	modtime = modtime.Truncate(time.Second)
-	if ret := modtime.Compare(t); ret <= 0 {
+	if modtime.Before(t) || modtime.Equal(t) {
 		return condFalse
 	}
 	return condTrue
@@ -663,6 +642,7 @@ func serveFile(w ResponseWriter, r *Request, fs FileSystem, name string, redirec
 			defer ff.Close()
 			dd, err := ff.Stat()
 			if err == nil {
+				name = index
 				d = dd
 				f = ff
 			}
@@ -838,7 +818,6 @@ func (f ioFile) Readdir(count int) ([]fs.FileInfo, error) {
 
 // FS converts fsys to a FileSystem implementation,
 // for use with FileServer and NewFileTransport.
-// The files provided by fsys must implement io.Seeker.
 func FS(fsys fs.FS) FileSystem {
 	return ioFS{fsys}
 }

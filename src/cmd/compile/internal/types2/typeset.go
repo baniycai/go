@@ -5,11 +5,10 @@
 package types2
 
 import (
+	"bytes"
 	"cmd/compile/internal/syntax"
 	"fmt"
-	. "internal/types/errors"
 	"sort"
-	"strings"
 )
 
 // ----------------------------------------------------------------------------
@@ -72,7 +71,7 @@ func (s *_TypeSet) String() string {
 	hasMethods := len(s.methods) > 0
 	hasTerms := s.hasTerms()
 
-	var buf strings.Builder
+	var buf bytes.Buffer
 	buf.WriteByte('{')
 	if s.comparable {
 		buf.WriteString("comparable")
@@ -204,7 +203,7 @@ func computeInterfaceTypeSet(check *Checker, pos syntax.Pos, ityp *Interface) *_
 	// the method m in an interface that embeds interface I. On the other hand,
 	// if a method is embedded via multiple overlapping embedded interfaces, we
 	// don't provide a guarantee which "original m" got chosen for the embedding
-	// interface. See also go.dev/issue/34421.
+	// interface. See also issue #34421.
 	//
 	// If we don't care to provide this identity guarantee anymore, instead of
 	// reusing the original method in embeddings, we can clone the method's Func
@@ -227,13 +226,12 @@ func computeInterfaceTypeSet(check *Checker, pos syntax.Pos, ityp *Interface) *_
 			}
 			// check != nil
 			var err error_
-			err.code = DuplicateDecl
 			err.errorf(pos, "duplicate method %s", m.name)
 			err.errorf(mpos[other.(*Func)], "other declaration of %s", m.name)
 			check.report(&err)
 		default:
 			// We have a duplicate method name in an embedded (not explicitly declared) method.
-			// Check method signatures after all types are computed (go.dev/issue/33656).
+			// Check method signatures after all types are computed (issue #33656).
 			// If we're pre-go1.14 (overlapping embeddings are not permitted), report that
 			// error here as well (even though we could do it eagerly) because it's the same
 			// error message.
@@ -244,9 +242,8 @@ func computeInterfaceTypeSet(check *Checker, pos syntax.Pos, ityp *Interface) *_
 			}
 			// check != nil
 			check.later(func() {
-				if !check.allowVersion(m.pkg, pos, go1_14) || !Identical(m.typ, other.Type()) {
+				if !check.allowVersion(m.pkg, 1, 14) || !Identical(m.typ, other.Type()) {
 					var err error_
-					err.code = DuplicateDecl
 					err.errorf(pos, "duplicate method %s", m.name)
 					err.errorf(mpos[other.(*Func)], "other declaration of %s", m.name)
 					check.report(&err)
@@ -278,7 +275,8 @@ func computeInterfaceTypeSet(check *Checker, pos syntax.Pos, ityp *Interface) *_
 			assert(!isTypeParam(typ))
 			tset := computeInterfaceTypeSet(check, pos, u)
 			// If typ is local, an error was already reported where typ is specified/defined.
-			if check != nil && check.isImportedConstraint(typ) && !check.verifyVersionf(pos, go1_18, "embedding constraint interface %s", typ) {
+			if check != nil && check.isImportedConstraint(typ) && !check.allowVersion(check.pkg, 1, 18) {
+				check.versionErrorf(pos, "go1.18", "embedding constraint interface %s", typ)
 				continue
 			}
 			comparable = tset.comparable
@@ -287,7 +285,8 @@ func computeInterfaceTypeSet(check *Checker, pos syntax.Pos, ityp *Interface) *_
 			}
 			terms = tset.terms
 		case *Union:
-			if check != nil && !check.verifyVersionf(pos, go1_18, "embedding interface element %s", u) {
+			if check != nil && !check.allowVersion(check.pkg, 1, 18) {
+				check.versionErrorf(pos, "go1.18", "embedding interface element %s", u)
 				continue
 			}
 			tset := computeUnionTypeSet(check, unionSets, pos, u)
@@ -301,7 +300,8 @@ func computeInterfaceTypeSet(check *Checker, pos syntax.Pos, ityp *Interface) *_
 			if u == Typ[Invalid] {
 				continue
 			}
-			if check != nil && !check.verifyVersionf(pos, go1_18, "embedding non-interface type %s", typ) {
+			if check != nil && !check.allowVersion(check.pkg, 1, 18) {
+				check.versionErrorf(pos, "go1.18", "embedding non-interface type %s", typ)
 				continue
 			}
 			terms = termlist{{false, typ}}
@@ -349,7 +349,7 @@ func intersectTermLists(xterms termlist, xcomp bool, yterms termlist, ycomp bool
 		i := 0
 		for _, t := range terms {
 			assert(t.typ != nil)
-			if comparable(t.typ, false /* strictly comparable */, nil, nil) {
+			if Comparable(t.typ) {
 				terms[i] = t
 				i++
 			}
@@ -421,7 +421,7 @@ func computeUnionTypeSet(check *Checker, unionSets map[*Union]*_TypeSet, pos syn
 		allTerms = allTerms.union(terms)
 		if len(allTerms) > maxTermCount {
 			if check != nil {
-				check.errorf(pos, InvalidUnion, "cannot handle more than %d union terms (implementation limitation)", maxTermCount)
+				check.errorf(pos, "cannot handle more than %d union terms (implementation limitation)", maxTermCount)
 			}
 			unionSets[utyp] = &invalidTypeSet
 			return unionSets[utyp]

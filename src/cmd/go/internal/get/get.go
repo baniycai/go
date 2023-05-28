@@ -69,8 +69,6 @@ it also updates any git submodules referenced by the repository.
 
 Get never checks out or updates code stored in vendor directories.
 
-For more about build flags, see 'go help build'.
-
 For more about specifying packages, see 'go help packages'.
 
 For more about how 'go get' finds source code to
@@ -172,7 +170,7 @@ func runGet(ctx context.Context, cmd *base.Command, args []string) {
 		mode |= load.GetTestDeps
 	}
 	for _, pkg := range downloadPaths(args) {
-		download(ctx, pkg, nil, &stk, mode)
+		download(pkg, nil, &stk, mode)
 	}
 	base.ExitIfErrors()
 
@@ -208,6 +206,7 @@ func downloadPaths(patterns []string) []string {
 	for _, arg := range patterns {
 		if strings.Contains(arg, "@") {
 			base.Fatalf("go: can only use path@version syntax with 'go get' and 'go install' in module-aware mode")
+			continue
 		}
 
 		// Guard against 'go get x.go', a common mistake.
@@ -252,7 +251,7 @@ var downloadRootCache = map[string]bool{}
 
 // download runs the download half of the get command
 // for the package or pattern named by the argument.
-func download(ctx context.Context, arg string, parent *load.Package, stk *load.ImportStack, mode int) {
+func download(arg string, parent *load.Package, stk *load.ImportStack, mode int) {
 	if mode&load.ResolveImport != 0 {
 		// Caller is responsible for expanding vendor paths.
 		panic("internal error: download mode has useVendor set")
@@ -260,13 +259,9 @@ func download(ctx context.Context, arg string, parent *load.Package, stk *load.I
 	load1 := func(path string, mode int) *load.Package {
 		if parent == nil {
 			mode := 0 // don't do module or vendor resolution
-			return load.LoadPackage(ctx, load.PackageOpts{}, path, base.Cwd(), stk, nil, mode)
+			return load.LoadImport(context.TODO(), load.PackageOpts{}, path, base.Cwd(), nil, stk, nil, mode)
 		}
-		p, err := load.LoadImport(ctx, load.PackageOpts{}, path, parent.Dir, parent, stk, nil, mode|load.ResolveModule)
-		if err != nil {
-			base.Errorf("%s", err)
-		}
-		return p
+		return load.LoadImport(context.TODO(), load.PackageOpts{}, path, parent.Dir, parent, stk, nil, mode|load.ResolveModule)
 	}
 
 	p := load1(arg, mode)
@@ -409,7 +404,7 @@ func download(ctx context.Context, arg string, parent *load.Package, stk *load.I
 			if i >= len(p.Imports) {
 				path = load.ResolveImportPath(p, path)
 			}
-			download(ctx, path, p, stk, 0)
+			download(path, p, stk, 0)
 		}
 
 		if isWildcard {
@@ -501,21 +496,21 @@ func downloadPackage(p *load.Package) error {
 		vcsCmd, repo, rootPath = rr.VCS, rr.Repo, rr.Root
 	}
 	if !blindRepo && !vcsCmd.IsSecure(repo) && security != web.Insecure {
-		return fmt.Errorf("cannot download: %v uses insecure protocol", repo)
+		return fmt.Errorf("cannot download, %v uses insecure protocol", repo)
 	}
 
 	if p.Internal.Build.SrcRoot == "" {
 		// Package not found. Put in first directory of $GOPATH.
 		list := filepath.SplitList(cfg.BuildContext.GOPATH)
 		if len(list) == 0 {
-			return fmt.Errorf("cannot download: $GOPATH not set. For more details see: 'go help gopath'")
+			return fmt.Errorf("cannot download, $GOPATH not set. For more details see: 'go help gopath'")
 		}
 		// Guard against people setting GOPATH=$GOROOT.
 		if filepath.Clean(list[0]) == filepath.Clean(cfg.GOROOT) {
-			return fmt.Errorf("cannot download: $GOPATH must not be set to $GOROOT. For more details see: 'go help gopath'")
+			return fmt.Errorf("cannot download, $GOPATH must not be set to $GOROOT. For more details see: 'go help gopath'")
 		}
 		if _, err := os.Stat(filepath.Join(list[0], "src/cmd/go/alldocs.go")); err == nil {
-			return fmt.Errorf("cannot download: %s is a GOROOT, not a GOPATH. For more details see: 'go help gopath'", list[0])
+			return fmt.Errorf("cannot download, %s is a GOROOT, not a GOPATH. For more details see: 'go help gopath'", list[0])
 		}
 		p.Internal.Build.Root = list[0]
 		p.Internal.Build.SrcRoot = filepath.Join(list[0], "src")

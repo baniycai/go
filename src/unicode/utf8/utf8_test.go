@@ -626,7 +626,7 @@ var longStringJapanese string    // ~100KB, non-ASCII
 
 func init() {
 	const japanese = "日本語日本語日本語日"
-	var b strings.Builder
+	var b bytes.Buffer
 	for i := 0; b.Len() < 100_000; i++ {
 		if i%100 == 0 {
 			b.WriteString(japanese)

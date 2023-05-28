@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build unix || (js && wasm) || wasip1
+//go:build unix || (js && wasm)
 
 package syscall
 
-// TimespecToNsec returns the time stored in ts as nanoseconds.
+// TimespecToNSec returns the time stored in ts as nanoseconds.
 func TimespecToNsec(ts Timespec) int64 { return ts.Nano() }
 
 // NsecToTimespec converts a number of nanoseconds into a Timespec.

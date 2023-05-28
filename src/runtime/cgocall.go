@@ -82,11 +82,80 @@
 // crosscall2 restores the callee-save registers for gcc and returns
 // to GoF, which unpacks any result values and returns to f.
 
+// 当 Go 代码需要调用 C 函数时，我们通常使用 cgo 工具生成对应的 C 函数实现，并将其编译为共享库供 Go 程序使用。cgo 还提供了一些辅助函数，以便 Go 代码能够更方便地调用 C 函数。
+//
+//在运行时，Go 首先会使用 runtime.cgocall 函数来将当前 goroutine 切换到 M（Machine）上执行并调用 runtime.asmcgocall 函数。asmcgocall 函数是用汇编语言编写的，它负责将控制权传递给 C 函数，并在 C 函数返回后将控制权切换回 Go 程序。
+//
+//asmcgocall 函数中的代码首先保存了当前栈帧的寄存器状态，然后获取 C 函数的参数并将其设置为第一个参数。接着，通过 CALL 指令调用 C 函数，并将其返回值保存在 AX 寄存器中。最后，恢复寄存器状态并返回。
+//
+//如果 C 函数需要回调 Go 函数，则需要生成一个专门的 C 函数，让它调用对应的 Go 函数实现。然后，该 C 函数就可以像普通的 C 函数一样被调用，而 Go 代码则只需通过 cgo 提供的接口注册这个 C 函数即可。
+//
+//在回调过程中，Go 代码会使用 crosscall2 函数来将控制权传递给 runtime.cgocallback 函数，并在 C 函数执行完毕后再将控制权传回 Go 代码。runtime.cgocallback 函数会先调用 runtime.exitsyscall 函数，该函数会阻塞等待当前 goroutine 可以再次运行，并解锁对应的 M。然后，runtime.cgocallback 函数会切换到当前 goroutine 的栈上，并调用 runtime.cgocallbackg 函数来执行实际的 Go 回调函数。
+//
+//在回调函数执行完毕后，runtime.cgocallbackg 函数会将控制权重新切换回 M 上，并执行一些必要的清理操作，如恢复之前保存的 goroutine 栈信息。最后，crosscall2 函数会将控制权传递回 C 函数并退出。
+//
+//总之，这个过程涉及到了很多底层细节，包括栈管理、寄存器状态保存和恢复、进出 syscalls 等等。但是通过 cgo 工具提供的接口，我们可以比较方便地在 Go 和 C 语言之间进行交互。
+
+// 当你需要调用一个用 C 语言编写的库时，你可以使用 cgo 工具将其封装为 Go 函数。下面是一个简单的例子，说明如何通过 cgo 调用 C 库中的函数。
+//
+//假设有以下 C 语言代码，定义了一个名为 `add` 的函数，它接收两个整数作为参数并返回它们的和：
+//
+//```c
+//// file: add.c
+//
+//#include <stdio.h>
+//
+//int add(int a, int b) {
+//    return a + b;
+//}
+//```
+//
+//要在 Go 中调用这个函数，首先需要创建一个包含 C 函数定义的头文件，例如：
+//
+//```c
+//// file: add.h
+//
+//#ifndef ADD_H
+//#define ADD_H
+//
+//extern int add(int a, int b);
+//
+//#endif // ADD_H
+//```
+//
+//然后，我们可以使用 cgo 工具自动生成对应的 Go 函数实现。为此，我们需要在 Go 源代码中包含此头文件，并在其之前添加注释 `import "C"` 声明使用 cgo 工具。然后，我们可以定义一个名为 `Add` 的函数来调用这个 C 函数：
+//
+//```go
+//// file: main.go
+//
+//package main
+//
+//// #include "add.h"
+//import "C"
+//
+//import "fmt"
+//
+//func Add(a, b int) int {
+//    return int(C.add(C.int(a), C.int(b)))
+//}
+//
+//func main() {
+//    result := Add(2, 3)
+//    fmt.Println(result) // 输出：5
+//}
+//```
+//
+//在这个例子中，我们首先使用 `import "C"` 导入 `add.h` 头文件，然后定义了一个名为 `Add` 的函数，该函数使用 `C` 包装了 C 函数的调用。最后，在主函数中我们调用了 `Add` 函数并输出结果。
+//
+//需要注意的是，我们需要将 C 类型转换为 Go 类型（这里使用 `int`）。另外，我们还需要包含编写 C 代码所需的头文件和库文件，并在编译时链接它们。
+//
+//总之，利用 cgo 工具可以方便地将 C 语言代码集成到 Go 程序中。通过这种方式，我们可以在 Go 中使用 C 库提供的丰富功能。
+
 package runtime
 
 import (
 	"internal/goarch"
-	"internal/goexperiment"
+	"runtime/internal/atomic"
 	"runtime/internal/sys"
 	"unsafe"
 )
@@ -136,6 +205,7 @@ func cgocall(fn, arg unsafe.Pointer) int32 {
 
 	mp := getg().m
 	mp.ncgocall++
+	mp.ncgo++
 
 	// Reset traceback.
 	mp.cgoCallers[0] = 0
@@ -164,14 +234,6 @@ func cgocall(fn, arg unsafe.Pointer) int32 {
 	osPreemptExtEnter(mp)
 
 	mp.incgo = true
-	// We use ncgo as a check during execution tracing for whether there is
-	// any C on the call stack, which there will be after this point. If
-	// there isn't, we can use frame pointer unwinding to collect call
-	// stacks efficiently. This will be the case for the first Go-to-C call
-	// on a stack, so it's prefereable to update it here, after we emit a
-	// trace event in entersyscall above.
-	mp.ncgo++
-
 	errno := asmcgocall(fn, arg)
 
 	// Update accounting before exitsyscall because exitsyscall may
@@ -236,9 +298,6 @@ func cgocallbackg(fn, frame unsafe.Pointer, ctxt uintptr) {
 	savedpc := gp.syscallpc
 	exitsyscall() // coming out of cgo call
 	gp.m.incgo = false
-	if gp.m.isextra {
-		gp.m.isExtraInC = false
-	}
 
 	osPreemptExtExit(gp.m)
 
@@ -249,9 +308,6 @@ func cgocallbackg(fn, frame unsafe.Pointer, ctxt uintptr) {
 	// This is enforced by checking incgo in the schedule function.
 
 	gp.m.incgo = true
-	if gp.m.isextra {
-		gp.m.isExtraInC = true
-	}
 
 	if gp.m != checkm {
 		throw("m changed unexpectedly in cgocallbackg")
@@ -272,7 +328,7 @@ func cgocallbackg1(fn, frame unsafe.Pointer, ctxt uintptr) {
 	// We must still stay on the same m.
 	defer unlockOSThread()
 
-	if gp.m.needextram || extraMWaiters.Load() > 0 {
+	if gp.m.needextram || atomic.Load(&extraMWaiters) > 0 {
 		gp.m.needextram = false
 		systemstack(newextram)
 	}
@@ -360,12 +416,12 @@ func unwindm(restore *bool) {
 	}
 }
 
-// called from assembly.
+// called from assembly
 func badcgocallback() {
 	throw("misaligned stack in cgocallback")
 }
 
-// called from (incomplete) assembly.
+// called from (incomplete) assembly
 func cgounimpl() {
 	throw("cgo not implemented")
 }
@@ -376,12 +432,12 @@ var racecgosync uint64 // represents possible synchronization in C code
 
 // We want to detect all cases where a program that does not use
 // unsafe makes a cgo call passing a Go pointer to memory that
-// contains an unpinned Go pointer. Here a Go pointer is defined as a
-// pointer to memory allocated by the Go runtime. Programs that use
-// unsafe can evade this restriction easily, so we don't try to catch
-// them. The cgo program will rewrite all possibly bad pointer
-// arguments to call cgoCheckPointer, where we can catch cases of a Go
-// pointer pointing to an unpinned Go pointer.
+// contains a Go pointer. Here a Go pointer is defined as a pointer
+// to memory allocated by the Go runtime. Programs that use unsafe
+// can evade this restriction easily, so we don't try to catch them.
+// The cgo program will rewrite all possibly bad pointer arguments to
+// call cgoCheckPointer, where we can catch cases of a Go pointer
+// pointing to a Go pointer.
 
 // Complicating matters, taking the address of a slice or array
 // element permits the C program to access all elements of the slice
@@ -403,9 +459,9 @@ var racecgosync uint64 // represents possible synchronization in C code
 // pointers.)
 
 // cgoCheckPointer checks if the argument contains a Go pointer that
-// points to an unpinned Go pointer, and panics if it does.
+// points to a Go pointer, and panics if it does.
 func cgoCheckPointer(ptr any, arg any) {
-	if !goexperiment.CgoCheck2 && debug.cgocheck == 0 {
+	if debug.cgocheck == 0 {
 		return
 	}
 
@@ -413,23 +469,23 @@ func cgoCheckPointer(ptr any, arg any) {
 	t := ep._type
 
 	top := true
-	if arg != nil && (t.Kind_&kindMask == kindPtr || t.Kind_&kindMask == kindUnsafePointer) {
+	if arg != nil && (t.kind&kindMask == kindPtr || t.kind&kindMask == kindUnsafePointer) {
 		p := ep.data
-		if t.Kind_&kindDirectIface == 0 {
+		if t.kind&kindDirectIface == 0 {
 			p = *(*unsafe.Pointer)(p)
 		}
 		if p == nil || !cgoIsGoPointer(p) {
 			return
 		}
 		aep := efaceOf(&arg)
-		switch aep._type.Kind_ & kindMask {
+		switch aep._type.kind & kindMask {
 		case kindBool:
-			if t.Kind_&kindMask == kindUnsafePointer {
+			if t.kind&kindMask == kindUnsafePointer {
 				// We don't know the type of the element.
 				break
 			}
 			pt := (*ptrtype)(unsafe.Pointer(t))
-			cgoCheckArg(pt.Elem, p, true, false, cgoCheckPointerFail)
+			cgoCheckArg(pt.elem, p, true, false, cgoCheckPointerFail)
 			return
 		case kindSlice:
 			// Check the slice rather than the pointer.
@@ -447,38 +503,37 @@ func cgoCheckPointer(ptr any, arg any) {
 		}
 	}
 
-	cgoCheckArg(t, ep.data, t.Kind_&kindDirectIface == 0, top, cgoCheckPointerFail)
+	cgoCheckArg(t, ep.data, t.kind&kindDirectIface == 0, top, cgoCheckPointerFail)
 }
 
-const cgoCheckPointerFail = "cgo argument has Go pointer to unpinned Go pointer"
+const cgoCheckPointerFail = "cgo argument has Go pointer to Go pointer"
 const cgoResultFail = "cgo result has Go pointer"
 
 // cgoCheckArg is the real work of cgoCheckPointer. The argument p
 // is either a pointer to the value (of type t), or the value itself,
 // depending on indir. The top parameter is whether we are at the top
-// level, where Go pointers are allowed. Go pointers to pinned objects are
-// always allowed.
+// level, where Go pointers are allowed.
 func cgoCheckArg(t *_type, p unsafe.Pointer, indir, top bool, msg string) {
-	if t.PtrBytes == 0 || p == nil {
+	if t.ptrdata == 0 || p == nil {
 		// If the type has no pointers there is nothing to do.
 		return
 	}
 
-	switch t.Kind_ & kindMask {
+	switch t.kind & kindMask {
 	default:
 		throw("can't happen")
 	case kindArray:
 		at := (*arraytype)(unsafe.Pointer(t))
 		if !indir {
-			if at.Len != 1 {
+			if at.len != 1 {
 				throw("can't happen")
 			}
-			cgoCheckArg(at.Elem, p, at.Elem.Kind_&kindDirectIface == 0, top, msg)
+			cgoCheckArg(at.elem, p, at.elem.kind&kindDirectIface == 0, top, msg)
 			return
 		}
-		for i := uintptr(0); i < at.Len; i++ {
-			cgoCheckArg(at.Elem, p, true, top, msg)
-			p = add(p, at.Elem.Size_)
+		for i := uintptr(0); i < at.len; i++ {
+			cgoCheckArg(at.elem, p, true, top, msg)
+			p = add(p, at.elem.size)
 		}
 	case kindChan, kindMap:
 		// These types contain internal pointers that will
@@ -508,10 +563,10 @@ func cgoCheckArg(t *_type, p unsafe.Pointer, indir, top bool, msg string) {
 		if !cgoIsGoPointer(p) {
 			return
 		}
-		if !top && !isPinned(p) {
+		if !top {
 			panic(errorString(msg))
 		}
-		cgoCheckArg(it, p, it.Kind_&kindDirectIface == 0, false, msg)
+		cgoCheckArg(it, p, it.kind&kindDirectIface == 0, false, msg)
 	case kindSlice:
 		st := (*slicetype)(unsafe.Pointer(t))
 		s := (*slice)(p)
@@ -519,38 +574,38 @@ func cgoCheckArg(t *_type, p unsafe.Pointer, indir, top bool, msg string) {
 		if p == nil || !cgoIsGoPointer(p) {
 			return
 		}
-		if !top && !isPinned(p) {
+		if !top {
 			panic(errorString(msg))
 		}
-		if st.Elem.PtrBytes == 0 {
+		if st.elem.ptrdata == 0 {
 			return
 		}
 		for i := 0; i < s.cap; i++ {
-			cgoCheckArg(st.Elem, p, true, false, msg)
-			p = add(p, st.Elem.Size_)
+			cgoCheckArg(st.elem, p, true, false, msg)
+			p = add(p, st.elem.size)
 		}
 	case kindString:
 		ss := (*stringStruct)(p)
 		if !cgoIsGoPointer(ss.str) {
 			return
 		}
-		if !top && !isPinned(ss.str) {
+		if !top {
 			panic(errorString(msg))
 		}
 	case kindStruct:
 		st := (*structtype)(unsafe.Pointer(t))
 		if !indir {
-			if len(st.Fields) != 1 {
+			if len(st.fields) != 1 {
 				throw("can't happen")
 			}
-			cgoCheckArg(st.Fields[0].Typ, p, st.Fields[0].Typ.Kind_&kindDirectIface == 0, top, msg)
+			cgoCheckArg(st.fields[0].typ, p, st.fields[0].typ.kind&kindDirectIface == 0, top, msg)
 			return
 		}
-		for _, f := range st.Fields {
-			if f.Typ.PtrBytes == 0 {
+		for _, f := range st.fields {
+			if f.typ.ptrdata == 0 {
 				continue
 			}
-			cgoCheckArg(f.Typ, add(p, f.Offset), true, top, msg)
+			cgoCheckArg(f.typ, add(p, f.offset), true, top, msg)
 		}
 	case kindPtr, kindUnsafePointer:
 		if indir {
@@ -563,7 +618,7 @@ func cgoCheckArg(t *_type, p unsafe.Pointer, indir, top bool, msg string) {
 		if !cgoIsGoPointer(p) {
 			return
 		}
-		if !top && !isPinned(p) {
+		if !top {
 			panic(errorString(msg))
 		}
 
@@ -573,7 +628,7 @@ func cgoCheckArg(t *_type, p unsafe.Pointer, indir, top bool, msg string) {
 
 // cgoCheckUnknownPointer is called for an arbitrary pointer into Go
 // memory. It checks whether that Go memory contains any other
-// pointer into unpinned Go memory. If it does, we panic.
+// pointer into Go memory. If it does, we panic.
 // The return values are unused but useful to see in panic tracebacks.
 func cgoCheckUnknownPointer(p unsafe.Pointer, msg string) (base, i uintptr) {
 	if inheap(uintptr(p)) {
@@ -582,17 +637,17 @@ func cgoCheckUnknownPointer(p unsafe.Pointer, msg string) (base, i uintptr) {
 		if base == 0 {
 			return
 		}
+		hbits := heapBitsForAddr(base)
 		n := span.elemsize
-		hbits := heapBitsForAddr(base, n)
-		for {
-			var addr uintptr
-			if hbits, addr = hbits.next(); addr == 0 {
+		for i = uintptr(0); i < n; i += goarch.PtrSize {
+			if !hbits.morePointers() {
+				// No more possible pointers.
 				break
 			}
-			pp := *(*unsafe.Pointer)(unsafe.Pointer(addr))
-			if cgoIsGoPointer(pp) && !isPinned(pp) {
+			if hbits.isPointer() && cgoIsGoPointer(*(*unsafe.Pointer)(unsafe.Pointer(base + i))) {
 				panic(errorString(msg))
 			}
+			hbits = hbits.next()
 		}
 
 		return
@@ -647,11 +702,11 @@ func cgoInRange(p unsafe.Pointer, start, end uintptr) bool {
 // exported Go function. It panics if the result is or contains a Go
 // pointer.
 func cgoCheckResult(val any) {
-	if !goexperiment.CgoCheck2 && debug.cgocheck == 0 {
+	if debug.cgocheck == 0 {
 		return
 	}
 
 	ep := efaceOf(&val)
 	t := ep._type
-	cgoCheckArg(t, ep.data, t.Kind_&kindDirectIface == 0, false, cgoResultFail)
+	cgoCheckArg(t, ep.data, t.kind&kindDirectIface == 0, false, cgoResultFail)
 }

@@ -13,6 +13,7 @@ import (
 	"errors"
 	"hash"
 	"io"
+	"math/big"
 )
 
 // Per RFC 8017, Section 9.1
@@ -48,7 +49,7 @@ func emsaPSSEncode(mHash []byte, emBits int, salt []byte, hash hash.Hash) ([]byt
 	// 3.  If emLen < hLen + sLen + 2, output "encoding error" and stop.
 
 	if emLen < hLen+sLen+2 {
-		return nil, ErrMessageTooLong
+		return nil, errors.New("crypto/rsa: key size too small for PSS signature")
 	}
 
 	em := make([]byte, emLen)
@@ -207,7 +208,7 @@ func emsaPSSVerify(mHash, em []byte, emBits, sLen int, hash hash.Hash) error {
 // Note that hashed must be the result of hashing the input message using the
 // given hash function. salt is a random sequence of bytes whose length will be
 // later used to verify the signature.
-func signPSSWithSalt(priv *PrivateKey, hash crypto.Hash, hashed, salt []byte) ([]byte, error) {
+func signPSSWithSalt(rand io.Reader, priv *PrivateKey, hash crypto.Hash, hashed, salt []byte) ([]byte, error) {
 	emBits := priv.N.BitLen() - 1
 	em, err := emsaPSSEncode(hashed, emBits, salt, hash.New())
 	if err != nil {
@@ -219,7 +220,7 @@ func signPSSWithSalt(priv *PrivateKey, hash crypto.Hash, hashed, salt []byte) ([
 		if err != nil {
 			return nil, err
 		}
-		// Note: BoringCrypto always does decrypt "withCheck".
+		// Note: BoringCrypto takes care of the "AndCheck" part of "decryptAndCheck".
 		// (It's not just decrypt.)
 		s, err := boring.DecryptRSANoPadding(bkey, em)
 		if err != nil {
@@ -228,20 +229,13 @@ func signPSSWithSalt(priv *PrivateKey, hash crypto.Hash, hashed, salt []byte) ([
 		return s, nil
 	}
 
-	// RFC 8017: "Note that the octet length of EM will be one less than k if
-	// modBits - 1 is divisible by 8 and equal to k otherwise, where k is the
-	// length in octets of the RSA modulus n." 🙄
-	//
-	// This is extremely annoying, as all other encrypt and decrypt inputs are
-	// always the exact same size as the modulus. Since it only happens for
-	// weird modulus sizes, fix it by padding inefficiently.
-	if emLen, k := len(em), priv.Size(); emLen < k {
-		emNew := make([]byte, k)
-		copy(emNew[k-emLen:], em)
-		em = emNew
+	m := new(big.Int).SetBytes(em)
+	c, err := decryptAndCheck(rand, priv, m)
+	if err != nil {
+		return nil, err
 	}
-
-	return decrypt(priv, em, withCheck)
+	s := make([]byte, priv.Size())
+	return c.FillBytes(s), nil
 }
 
 const (
@@ -255,8 +249,8 @@ const (
 
 // PSSOptions contains options for creating and verifying PSS signatures.
 type PSSOptions struct {
-	// SaltLength controls the length of the salt used in the PSS signature. It
-	// can either be a positive number of bytes, or one of the special
+	// SaltLength controls the length of the salt used in the PSS
+	// signature. It can either be a number of bytes, or one of the special
 	// PSSSaltLength constants.
 	SaltLength int
 
@@ -278,23 +272,12 @@ func (opts *PSSOptions) saltLength() int {
 	return opts.SaltLength
 }
 
-var invalidSaltLenErr = errors.New("crypto/rsa: PSSOptions.SaltLength cannot be negative")
-
 // SignPSS calculates the signature of digest using PSS.
 //
 // digest must be the result of hashing the input message using the given hash
 // function. The opts argument may be nil, in which case sensible defaults are
 // used. If opts.Hash is set, it overrides hash.
 func SignPSS(rand io.Reader, priv *PrivateKey, hash crypto.Hash, digest []byte, opts *PSSOptions) ([]byte, error) {
-	if boring.Enabled && rand == boring.RandReader {
-		bkey, err := boringPrivateKey(priv)
-		if err != nil {
-			return nil, err
-		}
-		return boring.SignRSAPSS(bkey, hash, digest, opts.saltLength())
-	}
-	boring.UnreachableExceptTests()
-
 	if opts != nil && opts.Hash != 0 {
 		hash = opts.Hash
 	}
@@ -303,23 +286,24 @@ func SignPSS(rand io.Reader, priv *PrivateKey, hash crypto.Hash, digest []byte, 
 	switch saltLength {
 	case PSSSaltLengthAuto:
 		saltLength = (priv.N.BitLen()-1+7)/8 - 2 - hash.Size()
-		if saltLength < 0 {
-			return nil, ErrMessageTooLong
-		}
 	case PSSSaltLengthEqualsHash:
 		saltLength = hash.Size()
-	default:
-		// If we get here saltLength is either > 0 or < -1, in the
-		// latter case we fail out.
-		if saltLength <= 0 {
-			return nil, invalidSaltLenErr
-		}
 	}
+
+	if boring.Enabled && rand == boring.RandReader {
+		bkey, err := boringPrivateKey(priv)
+		if err != nil {
+			return nil, err
+		}
+		return boring.SignRSAPSS(bkey, hash, digest, saltLength)
+	}
+	boring.UnreachableExceptTests()
+
 	salt := make([]byte, saltLength)
 	if _, err := io.ReadFull(rand, salt); err != nil {
 		return nil, err
 	}
-	return signPSSWithSalt(priv, hash, digest, salt)
+	return signPSSWithSalt(rand, priv, hash, digest, salt)
 }
 
 // VerifyPSS verifies a PSS signature.
@@ -342,31 +326,13 @@ func VerifyPSS(pub *PublicKey, hash crypto.Hash, digest []byte, sig []byte, opts
 	if len(sig) != pub.Size() {
 		return ErrVerification
 	}
-	// Salt length must be either one of the special constants (-1 or 0)
-	// or otherwise positive. If it is < PSSSaltLengthEqualsHash (-1)
-	// we return an error.
-	if opts.saltLength() < PSSSaltLengthEqualsHash {
-		return invalidSaltLenErr
-	}
-
+	s := new(big.Int).SetBytes(sig)
+	m := encrypt(new(big.Int), pub, s)
 	emBits := pub.N.BitLen() - 1
 	emLen := (emBits + 7) / 8
-	em, err := encrypt(pub, sig)
-	if err != nil {
+	if m.BitLen() > emLen*8 {
 		return ErrVerification
 	}
-
-	// Like in signPSSWithSalt, deal with mismatches between emLen and the size
-	// of the modulus. The spec would have us wire emLen into the encoding
-	// function, but we'd rather always encode to the size of the modulus and
-	// then strip leading zeroes if necessary. This only happens for weird
-	// modulus sizes anyway.
-	for len(em) > emLen && len(em) > 0 {
-		if em[0] != 0 {
-			return ErrVerification
-		}
-		em = em[1:]
-	}
-
+	em := m.FillBytes(make([]byte, emLen))
 	return emsaPSSVerify(digest, em, emBits, opts.saltLength(), hash.New())
 }

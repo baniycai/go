@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"go/constant"
 	"go/token"
-	. "internal/types/errors"
 )
 
 // An operandMode specifies the (addressing) mode of an operand.
@@ -175,7 +174,7 @@ func operandString(x *operand, qf Qualifier) string {
 		if x.typ != Typ[Invalid] {
 			var intro string
 			if isGeneric(x.typ) {
-				intro = " of generic type "
+				intro = " of parameterized type "
 			} else {
 				intro = " of type "
 			}
@@ -184,10 +183,6 @@ func operandString(x *operand, qf Qualifier) string {
 			if tpar, _ := x.typ.(*TypeParam); tpar != nil {
 				buf.WriteString(" constrained by ")
 				WriteType(&buf, tpar.bound, qf) // do not compute interface type sets here
-				// If we have the type set and it's empty, say so for better error messages.
-				if hasEmptyTypeset(tpar) {
-					buf.WriteString(" with empty type set")
-				}
 			}
 		} else {
 			buf.WriteString(" with invalid type")
@@ -235,16 +230,16 @@ func (x *operand) setConst(k syntax.LitKind, lit string) {
 	x.val = val
 }
 
-// isNil reports whether x is the (untyped) nil value.
+// isNil reports whether x is a typed or the untyped nil value.
 func (x *operand) isNil() bool { return x.mode == nilvalue }
 
 // assignableTo reports whether x is assignable to a variable of type T. If the
-// result is false and a non-nil cause is provided, it may be set to a more
+// result is false and a non-nil reason is provided, it may be set to a more
 // detailed explanation of the failure (result != ""). The returned error code
 // is only valid if the (first) result is false. The check parameter may be nil
 // if assignableTo is invoked through an exported API call, i.e., when all
 // methods have been type-checked.
-func (x *operand) assignableTo(check *Checker, T Type, cause *string) (bool, Code) {
+func (x *operand) assignableTo(check *Checker, T Type, reason *string) (bool, errorCode) {
 	if x.mode == invalid || T == Typ[Invalid] {
 		return true, 0 // avoid spurious errors
 	}
@@ -276,10 +271,10 @@ func (x *operand) assignableTo(check *Checker, T Type, cause *string) (bool, Cod
 				// don't need to do anything special.
 				newType, _, _ := check.implicitTypeAndValue(x, t.typ)
 				return newType != nil
-			}), IncompatibleAssign
+			}), _IncompatibleAssign
 		}
 		newType, _, _ := check.implicitTypeAndValue(x, T)
-		return newType != nil, IncompatibleAssign
+		return newType != nil, _IncompatibleAssign
 	}
 	// Vu is typed
 
@@ -293,20 +288,23 @@ func (x *operand) assignableTo(check *Checker, T Type, cause *string) (bool, Cod
 	// T is an interface type and x implements T and T is not a type parameter.
 	// Also handle the case where T is a pointer to an interface.
 	if _, ok := Tu.(*Interface); ok && Tp == nil || isInterfacePtr(Tu) {
-		if !check.implements(x.Pos(), V, T, false, cause) {
-			return false, InvalidIfaceAssign
+		if err := check.implements(V, T); err != nil {
+			if reason != nil {
+				*reason = err.Error()
+			}
+			return false, _InvalidIfaceAssign
 		}
 		return true, 0
 	}
 
 	// If V is an interface, check if a missing type assertion is the problem.
 	if Vi, _ := Vu.(*Interface); Vi != nil && Vp == nil {
-		if check.implements(x.Pos(), T, V, false, nil) {
+		if check.implements(T, V) == nil {
 			// T implements V, so give hint about type assertion.
-			if cause != nil {
-				*cause = "need type assertion"
+			if reason != nil {
+				*reason = "need type assertion"
 			}
-			return false, IncompatibleAssign
+			return false, _IncompatibleAssign
 		}
 	}
 
@@ -315,22 +313,22 @@ func (x *operand) assignableTo(check *Checker, T Type, cause *string) (bool, Cod
 	// and at least one of V or T is not a named type.
 	if Vc, ok := Vu.(*Chan); ok && Vc.dir == SendRecv {
 		if Tc, ok := Tu.(*Chan); ok && Identical(Vc.elem, Tc.elem) {
-			return !hasName(V) || !hasName(T), InvalidChanAssign
+			return !hasName(V) || !hasName(T), _InvalidChanAssign
 		}
 	}
 
 	// optimization: if we don't have type parameters, we're done
 	if Vp == nil && Tp == nil {
-		return false, IncompatibleAssign
+		return false, _IncompatibleAssign
 	}
 
 	errorf := func(format string, args ...interface{}) {
-		if check != nil && cause != nil {
+		if check != nil && reason != nil {
 			msg := check.sprintf(format, args...)
-			if *cause != "" {
-				msg += "\n\t" + *cause
+			if *reason != "" {
+				msg += "\n\t" + *reason
 			}
-			*cause = msg
+			*reason = msg
 		}
 	}
 
@@ -338,12 +336,12 @@ func (x *operand) assignableTo(check *Checker, T Type, cause *string) (bool, Cod
 	// x is assignable to each specific type in T's type set.
 	if !hasName(V) && Tp != nil {
 		ok := false
-		code := IncompatibleAssign
+		code := _IncompatibleAssign
 		Tp.is(func(T *term) bool {
 			if T == nil {
 				return false // no specific types
 			}
-			ok, code = x.assignableTo(check, T.typ, cause)
+			ok, code = x.assignableTo(check, T.typ, reason)
 			if !ok {
 				errorf("cannot assign %s to %s (in %s)", x.typ, T.typ, Tp)
 				return false
@@ -359,13 +357,13 @@ func (x *operand) assignableTo(check *Checker, T Type, cause *string) (bool, Cod
 	if Vp != nil && !hasName(T) {
 		x := *x // don't clobber outer x
 		ok := false
-		code := IncompatibleAssign
+		code := _IncompatibleAssign
 		Vp.is(func(V *term) bool {
 			if V == nil {
 				return false // no specific types
 			}
 			x.typ = V.typ
-			ok, code = x.assignableTo(check, T, cause)
+			ok, code = x.assignableTo(check, T, reason)
 			if !ok {
 				errorf("cannot assign %s (in %s) to %s", V.typ, Vp, T)
 				return false
@@ -375,7 +373,7 @@ func (x *operand) assignableTo(check *Checker, T Type, cause *string) (bool, Cod
 		return ok, code
 	}
 
-	return false, IncompatibleAssign
+	return false, _IncompatibleAssign
 }
 
 // kind2tok translates syntax.LitKinds into token.Tokens.

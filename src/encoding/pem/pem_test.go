@@ -192,7 +192,7 @@ var lineBreakerTests = []lineBreakerTest{
 
 func TestLineBreaker(t *testing.T) {
 	for i, test := range lineBreakerTests {
-		buf := new(strings.Builder)
+		buf := new(bytes.Buffer)
 		var breaker lineBreaker
 		breaker.out = buf
 		_, err := breaker.Write([]byte(test.in))
@@ -206,13 +206,13 @@ func TestLineBreaker(t *testing.T) {
 			continue
 		}
 
-		if got := buf.String(); got != test.out {
-			t.Errorf("#%d: got:%s want:%s", i, got, test.out)
+		if string(buf.Bytes()) != test.out {
+			t.Errorf("#%d: got:%s want:%s", i, string(buf.Bytes()), test.out)
 		}
 	}
 
 	for i, test := range lineBreakerTests {
-		buf := new(strings.Builder)
+		buf := new(bytes.Buffer)
 		var breaker lineBreaker
 		breaker.out = buf
 
@@ -229,8 +229,8 @@ func TestLineBreaker(t *testing.T) {
 			continue
 		}
 
-		if got := buf.String(); got != test.out {
-			t.Errorf("#%d: (byte by byte) got:%s want:%s", i, got, test.out)
+		if string(buf.Bytes()) != test.out {
+			t.Errorf("#%d: (byte by byte) got:%s want:%s", i, string(buf.Bytes()), test.out)
 		}
 	}
 }

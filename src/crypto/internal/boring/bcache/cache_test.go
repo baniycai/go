@@ -10,39 +10,31 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"unsafe"
 )
 
-var registeredCache Cache[int, int32]
+var registeredCache Cache
 
 func init() {
 	registeredCache.Register()
 }
 
-var seq atomic.Uint32
-
-func next[T int | int32]() *T {
-	x := new(T)
-	*x = T(seq.Add(1))
-	return x
-}
-
-func str[T int | int32](x *T) string {
-	if x == nil {
-		return "nil"
-	}
-	return fmt.Sprint(*x)
-}
-
 func TestCache(t *testing.T) {
 	// Use unregistered cache for functionality tests,
 	// to keep the runtime from clearing behind our backs.
-	c := new(Cache[int, int32])
+	c := new(Cache)
 
 	// Create many entries.
-	m := make(map[*int]*int32)
+	seq := uint32(0)
+	next := func() unsafe.Pointer {
+		x := new(int)
+		*x = int(atomic.AddUint32(&seq, 1))
+		return unsafe.Pointer(x)
+	}
+	m := make(map[unsafe.Pointer]unsafe.Pointer)
 	for i := 0; i < 10000; i++ {
-		k := next[int]()
-		v := next[int32]()
+		k := next()
+		v := next()
 		m[k] = v
 		c.Put(k, v)
 	}
@@ -50,7 +42,7 @@ func TestCache(t *testing.T) {
 	// Overwrite a random 20% of those.
 	n := 0
 	for k := range m {
-		v := next[int32]()
+		v := next()
 		m[k] = v
 		c.Put(k, v)
 		if n++; n >= 2000 {
@@ -59,6 +51,12 @@ func TestCache(t *testing.T) {
 	}
 
 	// Check results.
+	str := func(p unsafe.Pointer) string {
+		if p == nil {
+			return "nil"
+		}
+		return fmt.Sprint(*(*int)(p))
+	}
 	for k, v := range m {
 		if cv := c.Get(k); cv != v {
 			t.Fatalf("c.Get(%v) = %v, want %v", str(k), str(cv), str(v))
@@ -88,7 +86,7 @@ func TestCache(t *testing.T) {
 	// Lists are discarded if they reach 1000 entries,
 	// and there are cacheSize list heads, so we should be
 	// able to do 100 * cacheSize entries with no problem at all.
-	c = new(Cache[int, int32])
+	c = new(Cache)
 	var barrier, wg sync.WaitGroup
 	const N = 100
 	barrier.Add(N)
@@ -98,9 +96,9 @@ func TestCache(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			m := make(map[*int]*int32)
+			m := make(map[unsafe.Pointer]unsafe.Pointer)
 			for j := 0; j < cacheSize; j++ {
-				k, v := next[int](), next[int32]()
+				k, v := next(), next()
 				m[k] = v
 				c.Put(k, v)
 			}

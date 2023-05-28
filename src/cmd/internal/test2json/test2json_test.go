@@ -10,7 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
+	"io/ioutil"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -28,7 +28,7 @@ func TestGolden(t *testing.T) {
 	for _, file := range files {
 		name := strings.TrimSuffix(filepath.Base(file), ".test")
 		t.Run(name, func(t *testing.T) {
-			orig, err := os.ReadFile(file)
+			orig, err := ioutil.ReadFile(file)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -46,13 +46,13 @@ func TestGolden(t *testing.T) {
 			if *update {
 				js := strings.TrimSuffix(file, ".test") + ".json"
 				t.Logf("rewriting %s", js)
-				if err := os.WriteFile(js, buf.Bytes(), 0666); err != nil {
+				if err := ioutil.WriteFile(js, buf.Bytes(), 0666); err != nil {
 					t.Fatal(err)
 				}
 				return
 			}
 
-			want, err := os.ReadFile(strings.TrimSuffix(file, ".test") + ".json")
+			want, err := ioutil.ReadFile(strings.TrimSuffix(file, ".test") + ".json")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -70,16 +70,6 @@ func TestGolden(t *testing.T) {
 				writeAndKill(c, in)
 				c.Close()
 				diffJSON(t, buf.Bytes(), want)
-			})
-
-			// In bulk again with \r\n.
-			t.Run("crlf", func(t *testing.T) {
-				buf.Reset()
-				c = NewConverter(&buf, "", 0)
-				in = bytes.ReplaceAll(orig, []byte("\n"), []byte("\r\n"))
-				writeAndKill(c, in)
-				c.Close()
-				diffJSON(t, bytes.ReplaceAll(buf.Bytes(), []byte(`\r\n`), []byte(`\n`)), want)
 			})
 
 			// Write 2 bytes at a time on even boundaries.

@@ -1,4 +1,4 @@
-// +build !nacl,!js,!wasip1,gc
+// +build !nacl,!js,gc
 // run
 
 // Copyright 2014 The Go Authors. All rights reserved.

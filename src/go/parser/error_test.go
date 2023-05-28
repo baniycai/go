@@ -24,6 +24,7 @@ package parser
 
 import (
 	"flag"
+	"go/internal/typeparams"
 	"go/scanner"
 	"go/token"
 	"os"
@@ -62,9 +63,8 @@ func getPos(fset *token.FileSet, filename string, offset int) token.Pos {
 // a regular expression that matches the expected error message.
 // The special form /* ERROR HERE "rx" */ must be used for error
 // messages that appear immediately after a token, rather than at
-// a token's position, and ERROR AFTER means after the comment
-// (e.g. at end of line).
-var errRx = regexp.MustCompile(`^/\* *ERROR *(HERE|AFTER)? *"([^"]*)" *\*/$`)
+// a token's position.
+var errRx = regexp.MustCompile(`^/\* *ERROR *(HERE)? *"([^"]*)" *\*/$`)
 
 // expectedErrors collects the regular expressions of ERROR comments found
 // in files and returns them as a map of error positions to error messages.
@@ -87,12 +87,9 @@ func expectedErrors(fset *token.FileSet, filename string, src []byte) map[token.
 		case token.COMMENT:
 			s := errRx.FindStringSubmatch(lit)
 			if len(s) == 3 {
+				pos := prev
 				if s[1] == "HERE" {
-					pos = here // start of comment
-				} else if s[1] == "AFTER" {
-					pos += token.Pos(len(lit)) // end of comment
-				} else {
-					pos = prev // token prior to comment
+					pos = here
 				}
 				errors[pos] = s[2]
 			}
@@ -192,6 +189,9 @@ func TestErrors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if !d.IsDir() && !strings.HasPrefix(name, ".") && (strings.HasSuffix(name, ".src") || strings.HasSuffix(name, ".go2")) {
 				mode := DeclarationErrors | AllErrors
+				if !strings.HasSuffix(name, ".go2") {
+					mode |= typeparams.DisallowParsing
+				}
 				if *traceErrs {
 					mode |= Trace
 				}

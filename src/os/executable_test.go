@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"internal/testenv"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -17,8 +18,6 @@ const executable_EnvVar = "OSTEST_OUTPUT_EXECPATH"
 
 func TestExecutable(t *testing.T) {
 	testenv.MustHaveExec(t)
-	t.Parallel()
-
 	ep, err := os.Executable()
 	if err != nil {
 		t.Fatalf("Executable failed: %v", err)
@@ -30,18 +29,18 @@ func TestExecutable(t *testing.T) {
 		t.Fatalf("filepath.Rel: %v", err)
 	}
 
-	cmd := testenv.Command(t, fn, "-test.run=XXXX")
+	cmd := &osexec.Cmd{}
 	// make child start with a relative program path
 	cmd.Dir = dir
 	cmd.Path = fn
+	// forge argv[0] for child, so that we can verify we could correctly
+	// get real path of the executable without influenced by argv[0].
+	cmd.Args = []string{"-", "-test.run=XXXX"}
 	if runtime.GOOS == "openbsd" || runtime.GOOS == "aix" {
 		// OpenBSD and AIX rely on argv[0]
-	} else {
-		// forge argv[0] for child, so that we can verify we could correctly
-		// get real path of the executable without influenced by argv[0].
-		cmd.Args[0] = "-"
+		cmd.Args[0] = fn
 	}
-	cmd.Env = append(cmd.Environ(), fmt.Sprintf("%s=1", executable_EnvVar))
+	cmd.Env = append(os.Environ(), fmt.Sprintf("%s=1", executable_EnvVar))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("exec(self) failed: %v", err)
@@ -89,14 +88,13 @@ func init() {
 }
 
 func TestExecutableDeleted(t *testing.T) {
-	testenv.MustHaveGoBuild(t)
+	testenv.MustHaveExec(t)
 	switch runtime.GOOS {
 	case "windows", "plan9":
 		t.Skipf("%v does not support deleting running binary", runtime.GOOS)
 	case "openbsd", "freebsd", "aix":
 		t.Skipf("%v does not support reading deleted binary name", runtime.GOOS)
 	}
-	t.Parallel()
 
 	dir := t.TempDir()
 
@@ -108,13 +106,13 @@ func TestExecutableDeleted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := testenv.Command(t, testenv.GoToolPath(t), "build", "-o", exe, src).CombinedOutput()
+	out, err := osexec.Command(testenv.GoToolPath(t), "build", "-o", exe, src).CombinedOutput()
 	t.Logf("build output:\n%s", out)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	out, err = testenv.Command(t, exe).CombinedOutput()
+	out, err = osexec.Command(exe).CombinedOutput()
 	t.Logf("exec output:\n%s", out)
 	if err != nil {
 		t.Fatal(err)

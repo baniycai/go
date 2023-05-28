@@ -17,7 +17,7 @@ import (
 	"cmd/internal/obj/loong64"
 )
 
-// isFPreg reports whether r is an FP register.
+// isFPreg reports whether r is an FP register
 func isFPreg(r int16) bool {
 	return loong64.REG_F0 <= r && r <= loong64.REG_F31
 }
@@ -101,6 +101,9 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		p.To.Type = obj.TYPE_REG
 		p.To.Reg = y
 	case ssa.OpLOONG64MOVVnop:
+		if v.Reg() != v.Args[0].Reg() {
+			v.Fatalf("input[0] and output not in same register %s", v.LongString())
+		}
 		// nothing to do
 	case ssa.OpLoadReg:
 		if v.Type.IsFlags() {
@@ -131,8 +134,6 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		ssa.OpLOONG64SLLV,
 		ssa.OpLOONG64SRLV,
 		ssa.OpLOONG64SRAV,
-		ssa.OpLOONG64ROTR,
-		ssa.OpLOONG64ROTRV,
 		ssa.OpLOONG64ADDF,
 		ssa.OpLOONG64ADDD,
 		ssa.OpLOONG64SUBF,
@@ -140,9 +141,7 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		ssa.OpLOONG64MULF,
 		ssa.OpLOONG64MULD,
 		ssa.OpLOONG64DIVF,
-		ssa.OpLOONG64DIVD,
-		ssa.OpLOONG64MULV, ssa.OpLOONG64MULHV, ssa.OpLOONG64MULHVU,
-		ssa.OpLOONG64DIVV, ssa.OpLOONG64REMV, ssa.OpLOONG64DIVVU, ssa.OpLOONG64REMVU:
+		ssa.OpLOONG64DIVD:
 		p := s.Prog(v.Op.Asm())
 		p.From.Type = obj.TYPE_REG
 		p.From.Reg = v.Args[1].Reg()
@@ -166,8 +165,6 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		ssa.OpLOONG64SLLVconst,
 		ssa.OpLOONG64SRLVconst,
 		ssa.OpLOONG64SRAVconst,
-		ssa.OpLOONG64ROTRconst,
-		ssa.OpLOONG64ROTRVconst,
 		ssa.OpLOONG64SGTconst,
 		ssa.OpLOONG64SGTUconst:
 		p := s.Prog(v.Op.Asm())
@@ -176,6 +173,58 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		p.Reg = v.Args[0].Reg()
 		p.To.Type = obj.TYPE_REG
 		p.To.Reg = v.Reg()
+	case ssa.OpLOONG64MULV:
+		p := s.Prog(loong64.AMULV)
+		p.From.Type = obj.TYPE_REG
+		p.From.Reg = v.Args[1].Reg()
+		p.Reg = v.Args[0].Reg()
+		p.To.Type = obj.TYPE_REG
+		p.To.Reg = v.Reg1()
+		p1 := s.Prog(loong64.AMULHV)
+		p1.From.Type = obj.TYPE_REG
+		p1.From.Reg = v.Args[1].Reg()
+		p1.Reg = v.Args[0].Reg()
+		p1.To.Type = obj.TYPE_REG
+		p1.To.Reg = v.Reg0()
+	case ssa.OpLOONG64MULVU:
+		p := s.Prog(loong64.AMULV)
+		p.From.Type = obj.TYPE_REG
+		p.From.Reg = v.Args[1].Reg()
+		p.Reg = v.Args[0].Reg()
+		p.To.Type = obj.TYPE_REG
+		p.To.Reg = v.Reg1()
+		p1 := s.Prog(loong64.AMULHVU)
+		p1.From.Type = obj.TYPE_REG
+		p1.From.Reg = v.Args[1].Reg()
+		p1.Reg = v.Args[0].Reg()
+		p1.To.Type = obj.TYPE_REG
+		p1.To.Reg = v.Reg0()
+	case ssa.OpLOONG64DIVV:
+		p := s.Prog(loong64.ADIVV)
+		p.From.Type = obj.TYPE_REG
+		p.From.Reg = v.Args[1].Reg()
+		p.Reg = v.Args[0].Reg()
+		p.To.Type = obj.TYPE_REG
+		p.To.Reg = v.Reg1()
+		p1 := s.Prog(loong64.AREMV)
+		p1.From.Type = obj.TYPE_REG
+		p1.From.Reg = v.Args[1].Reg()
+		p1.Reg = v.Args[0].Reg()
+		p1.To.Type = obj.TYPE_REG
+		p1.To.Reg = v.Reg0()
+	case ssa.OpLOONG64DIVVU:
+		p := s.Prog(loong64.ADIVVU)
+		p.From.Type = obj.TYPE_REG
+		p.From.Reg = v.Args[1].Reg()
+		p.Reg = v.Args[0].Reg()
+		p.To.Type = obj.TYPE_REG
+		p.To.Reg = v.Reg1()
+		p1 := s.Prog(loong64.AREMVU)
+		p1.From.Type = obj.TYPE_REG
+		p1.From.Reg = v.Args[1].Reg()
+		p1.Reg = v.Args[0].Reg()
+		p1.To.Type = obj.TYPE_REG
+		p1.To.Reg = v.Reg0()
 	case ssa.OpLOONG64MOVVconst:
 		r := v.Reg()
 		p := s.Prog(v.Op.Asm())
@@ -466,8 +515,7 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		p := s.Prog(obj.ACALL)
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
-		// AuxInt encodes how many buffer entries we need.
-		p.To.Sym = ir.Syms.GCWriteBarrier[v.AuxInt-1]
+		p.To.Sym = v.Aux.(*obj.LSym)
 	case ssa.OpLOONG64LoweredPanicBoundsA, ssa.OpLOONG64LoweredPanicBoundsB, ssa.OpLOONG64LoweredPanicBoundsC:
 		p := s.Prog(obj.ACALL)
 		p.To.Type = obj.TYPE_MEM
@@ -735,13 +783,6 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		p.To.Reg = v.Reg()
 	case ssa.OpLOONG64LoweredGetCallerPC:
 		p := s.Prog(obj.AGETCALLERPC)
-		p.To.Type = obj.TYPE_REG
-		p.To.Reg = v.Reg()
-	case ssa.OpLOONG64MASKEQZ, ssa.OpLOONG64MASKNEZ:
-		p := s.Prog(v.Op.Asm())
-		p.From.Type = obj.TYPE_REG
-		p.From.Reg = v.Args[1].Reg()
-		p.Reg = v.Args[0].Reg()
 		p.To.Type = obj.TYPE_REG
 		p.To.Reg = v.Reg()
 	case ssa.OpClobber, ssa.OpClobberReg:

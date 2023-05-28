@@ -33,9 +33,9 @@ type spanSet struct {
 	// anyway. (In principle, we could do this during STW.)
 
 	spineLock mutex
-	spine     atomicSpanSetSpinePointer // *[N]atomic.Pointer[spanSetBlock]
-	spineLen  atomic.Uintptr            // Spine array length
-	spineCap  uintptr                   // Spine array cap, accessed under spineLock
+	spine     unsafe.Pointer // *[N]*spanSetBlock, accessed atomically
+	spineLen  uintptr        // Spine array length, accessed atomically
+	spineCap  uintptr        // Spine array cap, accessed under lock
 
 	// index is the head and tail of the spanSet in a single field.
 	// The head and the tail both represent an index into the logical
@@ -48,7 +48,7 @@ type spanSet struct {
 	// span in the heap were stored in this set, and each span were
 	// the minimum size (1 runtime page, 8 KiB), then roughly the
 	// smallest heap which would be unrepresentable is 32 TiB in size.
-	index atomicHeadTailIndex
+	index headTailIndex
 }
 
 const (
@@ -63,10 +63,10 @@ type spanSetBlock struct {
 	// popped is the number of pop operations that have occurred on
 	// this block. This number is used to help determine when a block
 	// may be safely recycled.
-	popped atomic.Uint32
+	popped uint32
 
 	// spans is the set of spans in this block.
-	spans [spanSetBlockEntries]atomicMSpanPointer
+	spans [spanSetBlockEntries]*mspan
 }
 
 // push adds span s to buffer b. push is safe to call concurrently
@@ -77,24 +77,25 @@ func (b *spanSet) push(s *mspan) {
 	top, bottom := cursor/spanSetBlockEntries, cursor%spanSetBlockEntries
 
 	// Do we need to add a block?
-	spineLen := b.spineLen.Load()
+	spineLen := atomic.Loaduintptr(&b.spineLen)
 	var block *spanSetBlock
 retry:
 	if top < spineLen {
-		block = b.spine.Load().lookup(top).Load()
+		spine := atomic.Loadp(unsafe.Pointer(&b.spine))
+		blockp := add(spine, goarch.PtrSize*top)
+		block = (*spanSetBlock)(atomic.Loadp(blockp))
 	} else {
 		// Add a new block to the spine, potentially growing
 		// the spine.
 		lock(&b.spineLock)
 		// spineLen cannot change until we release the lock,
 		// but may have changed while we were waiting.
-		spineLen = b.spineLen.Load()
+		spineLen = atomic.Loaduintptr(&b.spineLen)
 		if top < spineLen {
 			unlock(&b.spineLock)
 			goto retry
 		}
 
-		spine := b.spine.Load()
 		if spineLen == b.spineCap {
 			// Grow the spine.
 			newCap := b.spineCap * 2
@@ -105,12 +106,10 @@ retry:
 			if b.spineCap != 0 {
 				// Blocks are allocated off-heap, so
 				// no write barriers.
-				memmove(newSpine, spine.p, b.spineCap*goarch.PtrSize)
+				memmove(newSpine, b.spine, b.spineCap*goarch.PtrSize)
 			}
-			spine = spanSetSpinePointer{newSpine}
-
 			// Spine is allocated off-heap, so no write barrier.
-			b.spine.StoreNoWB(spine)
+			atomic.StorepNoWB(unsafe.Pointer(&b.spine), newSpine)
 			b.spineCap = newCap
 			// We can't immediately free the old spine
 			// since a concurrent push with a lower index
@@ -125,15 +124,16 @@ retry:
 		block = spanSetBlockPool.alloc()
 
 		// Add it to the spine.
+		blockp := add(b.spine, goarch.PtrSize*top)
 		// Blocks are allocated off-heap, so no write barrier.
-		spine.lookup(top).StoreNoWB(block)
-		b.spineLen.Store(spineLen + 1)
+		atomic.StorepNoWB(blockp, unsafe.Pointer(block))
+		atomic.Storeuintptr(&b.spineLen, spineLen+1)
 		unlock(&b.spineLock)
 	}
 
 	// We have a block. Insert the span atomically, since there may be
 	// concurrent readers via the block API.
-	block.spans[bottom].StoreNoWB(s)
+	atomic.StorepNoWB(unsafe.Pointer(&block.spans[bottom]), unsafe.Pointer(s))
 }
 
 // pop removes and returns a span from buffer b, or nil if b is empty.
@@ -150,7 +150,7 @@ claimLoop:
 		}
 		// Check if the head position we want to claim is actually
 		// backed by a block.
-		spineLen := b.spineLen.Load()
+		spineLen := atomic.Loaduintptr(&b.spineLen)
 		if spineLen <= uintptr(head)/spanSetBlockEntries {
 			// We're racing with a spine growth and the allocation of
 			// a new block (and maybe a new spine!), and trying to grab
@@ -180,23 +180,24 @@ claimLoop:
 	// We may be reading a stale spine pointer, but because the length
 	// grows monotonically and we've already verified it, we'll definitely
 	// be reading from a valid block.
-	blockp := b.spine.Load().lookup(uintptr(top))
+	spine := atomic.Loadp(unsafe.Pointer(&b.spine))
+	blockp := add(spine, goarch.PtrSize*uintptr(top))
 
 	// Given that the spine length is correct, we know we will never
 	// see a nil block here, since the length is always updated after
 	// the block is set.
-	block := blockp.Load()
-	s := block.spans[bottom].Load()
+	block := (*spanSetBlock)(atomic.Loadp(blockp))
+	s := (*mspan)(atomic.Loadp(unsafe.Pointer(&block.spans[bottom])))
 	for s == nil {
 		// We raced with the span actually being set, but given that we
 		// know a block for this span exists, the race window here is
 		// extremely small. Try again.
-		s = block.spans[bottom].Load()
+		s = (*mspan)(atomic.Loadp(unsafe.Pointer(&block.spans[bottom])))
 	}
 	// Clear the pointer. This isn't strictly necessary, but defensively
 	// avoids accidentally re-using blocks which could lead to memory
 	// corruption. This way, we'll get a nil pointer access instead.
-	block.spans[bottom].StoreNoWB(nil)
+	atomic.StorepNoWB(unsafe.Pointer(&block.spans[bottom]), nil)
 
 	// Increase the popped count. If we are the last possible popper
 	// in the block (note that bottom need not equal spanSetBlockEntries-1
@@ -210,9 +211,9 @@ claimLoop:
 	// pushers (there can't be any). Note that we may not be the popper
 	// which claimed the last slot in the block, we're just the last one
 	// to finish popping.
-	if block.popped.Add(1) == spanSetBlockEntries {
+	if atomic.Xadd(&block.popped, 1) == spanSetBlockEntries {
 		// Clear the block's pointer.
-		blockp.StoreNoWB(nil)
+		atomic.StorepNoWB(blockp, nil)
 
 		// Return the block to the block pool.
 		spanSetBlockPool.free(block)
@@ -234,23 +235,23 @@ func (b *spanSet) reset() {
 		throw("attempt to clear non-empty span set")
 	}
 	top := head / spanSetBlockEntries
-	if uintptr(top) < b.spineLen.Load() {
+	if uintptr(top) < b.spineLen {
 		// If the head catches up to the tail and the set is empty,
 		// we may not clean up the block containing the head and tail
 		// since it may be pushed into again. In order to avoid leaking
 		// memory since we're going to reset the head and tail, clean
 		// up such a block now, if it exists.
-		blockp := b.spine.Load().lookup(uintptr(top))
-		block := blockp.Load()
+		blockp := (**spanSetBlock)(add(b.spine, goarch.PtrSize*uintptr(top)))
+		block := *blockp
 		if block != nil {
-			// Check the popped value.
-			if block.popped.Load() == 0 {
+			// Sanity check the popped value.
+			if block.popped == 0 {
 				// popped should never be zero because that means we have
 				// pushed at least one value but not yet popped if this
 				// block pointer is not nil.
 				throw("span set block with unpopped elements found in reset")
 			}
-			if block.popped.Load() == spanSetBlockEntries {
+			if block.popped == spanSetBlockEntries {
 				// popped should also never be equal to spanSetBlockEntries
 				// because the last popper should have made the block pointer
 				// in this slot nil.
@@ -258,45 +259,14 @@ func (b *spanSet) reset() {
 			}
 
 			// Clear the pointer to the block.
-			blockp.StoreNoWB(nil)
+			atomic.StorepNoWB(unsafe.Pointer(blockp), nil)
 
 			// Return the block to the block pool.
 			spanSetBlockPool.free(block)
 		}
 	}
 	b.index.reset()
-	b.spineLen.Store(0)
-}
-
-// atomicSpanSetSpinePointer is an atomically-accessed spanSetSpinePointer.
-//
-// It has the same semantics as atomic.UnsafePointer.
-type atomicSpanSetSpinePointer struct {
-	a atomic.UnsafePointer
-}
-
-// Loads the spanSetSpinePointer and returns it.
-//
-// It has the same semantics as atomic.UnsafePointer.
-func (s *atomicSpanSetSpinePointer) Load() spanSetSpinePointer {
-	return spanSetSpinePointer{s.a.Load()}
-}
-
-// Stores the spanSetSpinePointer.
-//
-// It has the same semantics as atomic.UnsafePointer.
-func (s *atomicSpanSetSpinePointer) StoreNoWB(p spanSetSpinePointer) {
-	s.a.StoreNoWB(p.p)
-}
-
-// spanSetSpinePointer represents a pointer to a contiguous block of atomic.Pointer[spanSetBlock].
-type spanSetSpinePointer struct {
-	p unsafe.Pointer
-}
-
-// lookup returns &s[idx].
-func (s spanSetSpinePointer) lookup(idx uintptr) *atomic.Pointer[spanSetBlock] {
-	return (*atomic.Pointer[spanSetBlock])(add(unsafe.Pointer(s.p), goarch.PtrSize*idx))
+	atomic.Storeuintptr(&b.spineLen, 0)
 }
 
 // spanSetBlockPool is a global pool of spanSetBlocks.
@@ -318,11 +288,11 @@ func (p *spanSetBlockAlloc) alloc() *spanSetBlock {
 
 // free returns a spanSetBlock back to the pool.
 func (p *spanSetBlockAlloc) free(block *spanSetBlock) {
-	block.popped.Store(0)
+	atomic.Store(&block.popped, 0)
 	p.stack.push(&block.lfnode)
 }
 
-// headTailIndex represents a combined 32-bit head and 32-bit tail
+// haidTailIndex represents a combined 32-bit head and 32-bit tail
 // of a queue into a single 64-bit value.
 type headTailIndex uint64
 
@@ -347,34 +317,29 @@ func (h headTailIndex) split() (head uint32, tail uint32) {
 	return h.head(), h.tail()
 }
 
-// atomicHeadTailIndex is an atomically-accessed headTailIndex.
-type atomicHeadTailIndex struct {
-	u atomic.Uint64
-}
-
 // load atomically reads a headTailIndex value.
-func (h *atomicHeadTailIndex) load() headTailIndex {
-	return headTailIndex(h.u.Load())
+func (h *headTailIndex) load() headTailIndex {
+	return headTailIndex(atomic.Load64((*uint64)(h)))
 }
 
 // cas atomically compares-and-swaps a headTailIndex value.
-func (h *atomicHeadTailIndex) cas(old, new headTailIndex) bool {
-	return h.u.CompareAndSwap(uint64(old), uint64(new))
+func (h *headTailIndex) cas(old, new headTailIndex) bool {
+	return atomic.Cas64((*uint64)(h), uint64(old), uint64(new))
 }
 
 // incHead atomically increments the head of a headTailIndex.
-func (h *atomicHeadTailIndex) incHead() headTailIndex {
-	return headTailIndex(h.u.Add(1 << 32))
+func (h *headTailIndex) incHead() headTailIndex {
+	return headTailIndex(atomic.Xadd64((*uint64)(h), (1 << 32)))
 }
 
 // decHead atomically decrements the head of a headTailIndex.
-func (h *atomicHeadTailIndex) decHead() headTailIndex {
-	return headTailIndex(h.u.Add(-(1 << 32)))
+func (h *headTailIndex) decHead() headTailIndex {
+	return headTailIndex(atomic.Xadd64((*uint64)(h), -(1 << 32)))
 }
 
 // incTail atomically increments the tail of a headTailIndex.
-func (h *atomicHeadTailIndex) incTail() headTailIndex {
-	ht := headTailIndex(h.u.Add(1))
+func (h *headTailIndex) incTail() headTailIndex {
+	ht := headTailIndex(atomic.Xadd64((*uint64)(h), +1))
 	// Check for overflow.
 	if ht.tail() == 0 {
 		print("runtime: head = ", ht.head(), ", tail = ", ht.tail(), "\n")
@@ -384,21 +349,6 @@ func (h *atomicHeadTailIndex) incTail() headTailIndex {
 }
 
 // reset clears the headTailIndex to (0, 0).
-func (h *atomicHeadTailIndex) reset() {
-	h.u.Store(0)
-}
-
-// atomicMSpanPointer is an atomic.Pointer[mspan]. Can't use generics because it's NotInHeap.
-type atomicMSpanPointer struct {
-	p atomic.UnsafePointer
-}
-
-// Load returns the *mspan.
-func (p *atomicMSpanPointer) Load() *mspan {
-	return (*mspan)(p.p.Load())
-}
-
-// Store stores an *mspan.
-func (p *atomicMSpanPointer) StoreNoWB(s *mspan) {
-	p.p.StoreNoWB(unsafe.Pointer(s))
+func (h *headTailIndex) reset() {
+	atomic.Store64((*uint64)(h), 0)
 }

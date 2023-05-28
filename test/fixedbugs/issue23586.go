@@ -7,7 +7,7 @@
 // Test that we type-check deferred/go functions even
 // if they are not called (a common error). Specifically,
 // we don't want to see errors such as import or variable
-// declared and not used.
+// declared but not used.
 
 package p
 

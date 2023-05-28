@@ -4,29 +4,24 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build cgo
-
 package main
 
 import (
-	"runtime/cgo"
 	"unsafe"
 )
 
-type S struct {
-	_ cgo.Incomplete
-	x int
-}
+//go:notinheap
+type S struct{ x int }
 
 func main() {
 	var i int
 	p := (*S)(unsafe.Pointer(uintptr(unsafe.Pointer(&i))))
 	v := uintptr(unsafe.Pointer(p))
-	// p is a pointer to a not-in-heap type. Like some C libraries,
+	// p is a pointer to a go:notinheap type. Like some C libraries,
 	// we stored an integer in that pointer. That integer just happens
 	// to be the address of i.
 	// v is also the address of i.
-	// p has a base type which is marked not-in-heap, so it
+	// p has a base type which is marked go:notinheap, so it
 	// should not be adjusted when the stack is copied.
 	recurse(100, p, v)
 }

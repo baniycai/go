@@ -5,6 +5,7 @@
 package lex
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 	"text/scanner"
@@ -274,7 +275,7 @@ func lines(a ...string) string {
 
 // drain returns a single string representing the processed input tokens.
 func drain(input *Input) string {
-	var buf strings.Builder
+	var buf bytes.Buffer
 	for {
 		tok := input.Next()
 		if tok == scanner.EOF {

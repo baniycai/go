@@ -26,7 +26,6 @@ import (
 	"math/big"
 	"reflect"
 	"strconv"
-	"strings"
 	"time"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -112,7 +111,7 @@ func parseInt64(bytes []byte) (ret int64, err error) {
 	return
 }
 
-// parseInt32 treats the given bytes as a big-endian, signed integer and returns
+// parseInt treats the given bytes as a big-endian, signed integer and returns
 // the result.
 func parseInt32(bytes []byte) (int32, error) {
 	if err := checkInteger(bytes); err != nil {
@@ -163,7 +162,7 @@ type BitString struct {
 }
 
 // At returns the bit at the given index. If the index is out of range it
-// returns 0.
+// returns false.
 func (b BitString) At(i int) int {
 	if i < 0 || i >= b.BitLength {
 		return 0
@@ -237,18 +236,16 @@ func (oi ObjectIdentifier) Equal(other ObjectIdentifier) bool {
 }
 
 func (oi ObjectIdentifier) String() string {
-	var s strings.Builder
-	s.Grow(32)
+	var s string
 
-	buf := make([]byte, 0, 19)
 	for i, v := range oi {
 		if i > 0 {
-			s.WriteByte('.')
+			s += "."
 		}
-		s.Write(strconv.AppendInt(buf, int64(v), 10))
+		s += strconv.Itoa(v)
 	}
 
-	return s.String()
+	return s
 }
 
 // parseObjectIdentifier parses an OBJECT IDENTIFIER from the given bytes and
@@ -368,7 +365,7 @@ func parseUTCTime(bytes []byte) (ret time.Time, err error) {
 // parseGeneralizedTime parses the GeneralizedTime from the given byte slice
 // and returns the resulting time.
 func parseGeneralizedTime(bytes []byte) (ret time.Time, err error) {
-	const formatStr = "20060102150405.999999999Z0700"
+	const formatStr = "20060102150405Z0700"
 	s := string(bytes)
 
 	if ret, err = time.Parse(formatStr, s); err != nil {
@@ -663,7 +660,7 @@ var (
 	timeType             = reflect.TypeOf(time.Time{})
 	rawValueType         = reflect.TypeOf(RawValue{})
 	rawContentsType      = reflect.TypeOf(RawContent(nil))
-	bigIntType           = reflect.TypeOf((*big.Int)(nil))
+	bigIntType           = reflect.TypeOf(new(big.Int))
 )
 
 // invalidLength reports whether offset + length > sliceLength, or if the

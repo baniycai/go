@@ -9,7 +9,6 @@ import (
 
 	"cmd/compile/internal/base"
 	"cmd/internal/src"
-	"internal/types/errors"
 )
 
 var PtrSize int
@@ -64,10 +63,9 @@ var CalcSizeDisabled bool
 // the size of a pointer, set in gc.Main (see ../gc/main.go).
 var defercalc int
 
-// RoundUp rounds o to a multiple of r, r is a power of 2.
-func RoundUp(o int64, r int64) int64 {
+func Rnd(o int64, r int64) int64 {
 	if r < 1 || r > 8 || r&(r-1) != 0 {
-		base.Fatalf("Round %d", r)
+		base.Fatalf("rnd %d", r)
 	}
 	return (o + r - 1) &^ (r - 1)
 }
@@ -85,7 +83,7 @@ func expandiface(t *Type) {
 		case !explicit && Identical(m.Type, prev.Type):
 			return
 		default:
-			base.ErrorfAt(m.Pos, errors.DuplicateDecl, "duplicate method %s", m.Sym.Name)
+			base.ErrorfAt(m.Pos, "duplicate method %s", m.Sym.Name)
 		}
 		methods = append(methods, m)
 	}
@@ -124,6 +122,10 @@ func expandiface(t *Type) {
 			continue
 		}
 
+		if m.Type.IsUnion() {
+			continue
+		}
+
 		// In 1.18, embedded types can be anything. In Go 1.17, we disallow
 		// embedding anything other than interfaces. This requirement was caught
 		// by types2 already, so allow non-interface here.
@@ -148,7 +150,7 @@ func expandiface(t *Type) {
 	sort.Sort(MethodsByName(methods))
 
 	if int64(len(methods)) >= MaxWidth/int64(PtrSize) {
-		base.ErrorfAt(typePos(t), 0, "interface too large")
+		base.ErrorfAt(typePos(t), "interface too large")
 	}
 	for i, m := range methods {
 		m.Offset = int64(i) * int64(PtrSize)
@@ -181,18 +183,11 @@ func calcStructOffset(errtype *Type, t *Type, o int64, flag int) int64 {
 		}
 
 		CalcSize(f.Type)
-		// If type T contains a field F marked as not-in-heap,
-		// then T must also be a not-in-heap type. Otherwise,
-		// you could heap allocate T and then get a pointer F,
-		// which would be a heap pointer to a not-in-heap type.
-		if f.Type.NotInHeap() {
-			t.SetNotInHeap(true)
-		}
 		if int32(f.Type.align) > maxalign {
 			maxalign = int32(f.Type.align)
 		}
 		if f.Type.align > 0 {
-			o = RoundUp(o, int64(f.Type.align))
+			o = Rnd(o, int64(f.Type.align))
 		}
 		if isStruct { // For receiver/args/results, do not set, it depends on ABI
 			f.Offset = o
@@ -213,7 +208,7 @@ func calcStructOffset(errtype *Type, t *Type, o int64, flag int) int64 {
 			maxwidth = 1<<31 - 1
 		}
 		if o >= maxwidth {
-			base.ErrorfAt(typePos(errtype), 0, "type %L too large", errtype)
+			base.ErrorfAt(typePos(errtype), "type %L too large", errtype)
 			o = 8 // small but nonzero
 		}
 	}
@@ -228,7 +223,7 @@ func calcStructOffset(errtype *Type, t *Type, o int64, flag int) int64 {
 
 	// final width is rounded
 	if flag != 0 {
-		o = RoundUp(o, int64(maxalign))
+		o = Rnd(o, int64(maxalign))
 	}
 	t.align = uint8(maxalign)
 
@@ -340,6 +335,12 @@ func CalcSize(t *Type) {
 		t.align = uint8(PtrSize)
 		expandiface(t)
 
+	case TUNION:
+		// Always part of an interface for now, so size/align don't matter.
+		// Pretend a union is represented like an interface.
+		w = 2 * int64(PtrSize)
+		t.align = uint8(PtrSize)
+
 	case TCHAN: // implemented as pointer
 		w = int64(PtrSize)
 
@@ -389,7 +390,6 @@ func CalcSize(t *Type) {
 		}
 
 		CalcSize(t.Elem())
-		t.SetNotInHeap(t.Elem().NotInHeap())
 		if t.Elem().width != 0 {
 			cap := (uint64(MaxWidth) - 1) / uint64(t.Elem().width)
 			if uint64(t.NumElem()) > cap {
@@ -410,10 +410,6 @@ func CalcSize(t *Type) {
 	case TSTRUCT:
 		if t.IsFuncArgStruct() {
 			base.Fatalf("CalcSize fn struct %v", t)
-		}
-		// Recognize and mark runtime/internal/sys.nih as not-in-heap.
-		if sym := t.Sym(); sym != nil && sym.Pkg.Path == "runtime/internal/sys" && sym.Name == "nih" {
-			t.SetNotInHeap(true)
 		}
 		w = calcStructOffset(t, t, 0, 1)
 
@@ -436,6 +432,11 @@ func CalcSize(t *Type) {
 			base.Warn("bad type %v %d\n", t1, w)
 		}
 		t.align = 1
+
+	case TTYPEPARAM:
+		// TODO(danscales) - remove when we eliminate the need
+		// to do CalcSize in noder2 (which shouldn't be needed in the noder)
+		w = int64(PtrSize)
 	}
 
 	if PtrSize == 4 && w != int64(int32(w)) {

@@ -36,8 +36,6 @@ import (
 	"sync"
 
 	"cmd/go/internal/base"
-	"cmd/go/internal/cfg"
-	"cmd/go/internal/gover"
 	"cmd/go/internal/imports"
 	"cmd/go/internal/modfetch"
 	"cmd/go/internal/modload"
@@ -47,6 +45,7 @@ import (
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
 )
 
 var CmdGet = &base.Command{
@@ -302,7 +301,7 @@ func runGet(ctx context.Context, cmd *base.Command, args []string) {
 			"\tor run 'go help get' or 'go help install'.")
 	}
 
-	dropToolchain, queries := parseArgs(ctx, args)
+	queries := parseArgs(ctx, args)
 
 	r := newResolver(ctx, queries)
 	r.performLocalQueries(ctx)
@@ -371,10 +370,6 @@ func runGet(ctx context.Context, cmd *base.Command, args []string) {
 	}
 	r.checkPackageProblems(ctx, pkgPatterns)
 
-	if dropToolchain {
-		modload.OverrideRoots(ctx, []module.Version{{Path: "toolchain", Version: "none"}})
-	}
-
 	// Everything succeeded. Update go.mod.
 	oldReqs := reqsFromGoMod(modload.ModFile())
 
@@ -390,25 +385,15 @@ func runGet(ctx context.Context, cmd *base.Command, args []string) {
 //
 // The command-line arguments are of the form path@version or simply path, with
 // implicit @upgrade. path@none is "downgrade away".
-func parseArgs(ctx context.Context, rawArgs []string) (dropToolchain bool, queries []*query) {
+func parseArgs(ctx context.Context, rawArgs []string) []*query {
 	defer base.ExitIfErrors()
 
+	var queries []*query
 	for _, arg := range search.CleanPatterns(rawArgs) {
 		q, err := newQuery(arg)
 		if err != nil {
 			base.Errorf("go: %v", err)
 			continue
-		}
-
-		if q.version == "none" {
-			switch q.pattern {
-			case "go":
-				base.Errorf("go: cannot use go@none")
-				continue
-			case "toolchain":
-				dropToolchain = true
-				continue
-			}
 		}
 
 		// If there were no arguments, CleanPatterns returns ".". Set the raw
@@ -434,7 +419,7 @@ func parseArgs(ctx context.Context, rawArgs []string) (dropToolchain bool, queri
 		queries = append(queries, q)
 	}
 
-	return dropToolchain, queries
+	return queries
 }
 
 type resolver struct {
@@ -462,17 +447,12 @@ type resolver struct {
 
 	work *par.Queue
 
-	matchInModuleCache par.ErrCache[matchInModuleKey, []string]
+	matchInModuleCache par.Cache
 }
 
 type versionReason struct {
 	version string
 	reason  *query
-}
-
-type matchInModuleKey struct {
-	pattern string
-	m       module.Version
 }
 
 func newResolver(ctx context.Context, queries []*query) *resolver {
@@ -567,7 +547,7 @@ func (r *resolver) queryModule(ctx context.Context, mPath, query string, selecte
 	return module.Version{Path: mPath, Version: rev.Version}, nil
 }
 
-// queryPackages wraps modload.QueryPackage, substituting r.checkAllowedOr to
+// queryPackage wraps modload.QueryPackage, substituting r.checkAllowedOr to
 // decide allowed versions.
 func (r *resolver) queryPackages(ctx context.Context, pattern, query string, selected func(string) string) (pkgMods []module.Version, err error) {
 	results, err := modload.QueryPackages(ctx, pattern, query, selected, r.checkAllowedOr(query, selected))
@@ -612,13 +592,24 @@ func (r *resolver) checkAllowedOr(requested string, selected func(string) string
 
 // matchInModule is a caching wrapper around modload.MatchInModule.
 func (r *resolver) matchInModule(ctx context.Context, pattern string, m module.Version) (packages []string, err error) {
-	return r.matchInModuleCache.Do(matchInModuleKey{pattern, m}, func() ([]string, error) {
+	type key struct {
+		pattern string
+		m       module.Version
+	}
+	type entry struct {
+		packages []string
+		err      error
+	}
+
+	e := r.matchInModuleCache.Do(key{pattern, m}, func() any {
 		match := modload.MatchInModule(ctx, pattern, m, imports.AnyTags())
 		if len(match.Errs) > 0 {
-			return match.Pkgs, match.Errs[0]
+			return entry{match.Pkgs, match.Errs[0]}
 		}
-		return match.Pkgs, nil
-	})
+		return entry{match.Pkgs, nil}
+	}).(entry)
+
+	return e.packages, e.err
 }
 
 // queryNone adds a candidate set to q for each module matching q.pattern.
@@ -1601,7 +1592,7 @@ func (r *resolver) checkPackageProblems(ctx context.Context, pkgPatterns []strin
 		r.work.Add(func() {
 			if _, err := modfetch.DownloadZip(ctx, mActual); err != nil {
 				verb := "upgraded"
-				if gover.ModCompare(m.Path, m.Version, old.Version) < 0 {
+				if semver.Compare(m.Version, old.Version) < 0 {
 					verb = "downgraded"
 				}
 				replaced := ""
@@ -1660,9 +1651,6 @@ func (r *resolver) reportChanges(oldReqs, newReqs []module.Version) {
 
 	// Collect changes in modules matched by command line arguments.
 	for path, reason := range r.resolvedVersion {
-		if gover.IsToolchain(path) {
-			continue
-		}
 		old := r.initialVersion[path]
 		new := reason.version
 		if old != new && (old != "" || new != "none") {
@@ -1672,9 +1660,6 @@ func (r *resolver) reportChanges(oldReqs, newReqs []module.Version) {
 
 	// Collect changes to explicit requirements in go.mod.
 	for _, req := range oldReqs {
-		if gover.IsToolchain(req.Path) {
-			continue
-		}
 		path := req.Path
 		old := req.Version
 		new := r.buildListVersion[path]
@@ -1683,9 +1668,6 @@ func (r *resolver) reportChanges(oldReqs, newReqs []module.Version) {
 		}
 	}
 	for _, req := range newReqs {
-		if gover.IsToolchain(req.Path) {
-			continue
-		}
 		path := req.Path
 		old := r.initialVersion[path]
 		new := req.Version
@@ -1694,57 +1676,19 @@ func (r *resolver) reportChanges(oldReqs, newReqs []module.Version) {
 		}
 	}
 
-	// Toolchain diffs are easier than requirements: diff old and new directly.
-	toolchainVersions := func(reqs []module.Version) (goV, toolchain string) {
-		for _, req := range reqs {
-			if req.Path == "go" {
-				goV = req.Version
-			}
-			if req.Path == "toolchain" {
-				toolchain = req.Version
-			}
-		}
-		return
-	}
-	oldGo, oldToolchain := toolchainVersions(oldReqs)
-	newGo, newToolchain := toolchainVersions(newReqs)
-	if oldGo != newGo {
-		changes["go"] = change{"go", oldGo, newGo}
-	}
-	if oldToolchain != newToolchain {
-		changes["toolchain"] = change{"toolchain", oldToolchain, newToolchain}
-	}
-
 	sortedChanges := make([]change, 0, len(changes))
 	for _, c := range changes {
 		sortedChanges = append(sortedChanges, c)
 	}
 	sort.Slice(sortedChanges, func(i, j int) bool {
-		pi := sortedChanges[i].path
-		pj := sortedChanges[j].path
-		if pi == pj {
-			return false
-		}
-		// go first; toolchain second
-		switch {
-		case pi == "go":
-			return true
-		case pj == "go":
-			return false
-		case pi == "toolchain":
-			return true
-		case pj == "toolchain":
-			return false
-		}
-		return pi < pj
+		return sortedChanges[i].path < sortedChanges[j].path
 	})
-
 	for _, c := range sortedChanges {
 		if c.old == "" {
 			fmt.Fprintf(os.Stderr, "go: added %s %s\n", c.path, c.new)
 		} else if c.new == "none" || c.new == "" {
 			fmt.Fprintf(os.Stderr, "go: removed %s %s\n", c.path, c.old)
-		} else if gover.ModCompare(c.path, c.new, c.old) > 0 {
+		} else if semver.Compare(c.new, c.old) > 0 {
 			fmt.Fprintf(os.Stderr, "go: upgraded %s %s => %s\n", c.path, c.old, c.new)
 		} else {
 			fmt.Fprintf(os.Stderr, "go: downgraded %s %s => %s\n", c.path, c.old, c.new)
@@ -1810,35 +1754,15 @@ func (r *resolver) updateBuildList(ctx context.Context, additions []module.Versi
 			return false
 		}
 
-		if cfg.BuildV {
-			// Log complete paths for the conflicts before we summarize them.
-			for _, c := range constraint.Conflicts {
-				fmt.Fprintf(os.Stderr, "go: %v\n", c.String())
-			}
-		}
-
-		// modload.EditBuildList reports constraint errors at
-		// the module level, but 'go get' operates on packages.
-		// Rewrite the errors to explain them in terms of packages.
 		reason := func(m module.Version) string {
 			rv, ok := r.resolvedVersion[m.Path]
 			if !ok {
-				return fmt.Sprintf("(INTERNAL ERROR: no reason found for %v)", m)
+				panic(fmt.Sprintf("internal error: can't find reason for requirement on %v", m))
 			}
 			return rv.reason.ResolvedString(module.Version{Path: m.Path, Version: rv.version})
 		}
 		for _, c := range constraint.Conflicts {
-			adverb := ""
-			if len(c.Path) > 2 {
-				adverb = "indirectly "
-			}
-			firstReason := reason(c.Path[0])
-			last := c.Path[len(c.Path)-1]
-			if c.Err != nil {
-				base.Errorf("go: %v %srequires %v: %v", firstReason, adverb, last, c.UnwrapModuleError())
-			} else {
-				base.Errorf("go: %v %srequires %v, not %v", firstReason, adverb, last, reason(c.Constraint))
-			}
+			base.Errorf("go: %v requires %v, not %v", reason(c.Source), c.Dep, reason(c.Constraint))
 		}
 		return false
 	}
@@ -1856,15 +1780,9 @@ func (r *resolver) updateBuildList(ctx context.Context, additions []module.Versi
 }
 
 func reqsFromGoMod(f *modfile.File) []module.Version {
-	reqs := make([]module.Version, len(f.Require), 2+len(f.Require))
+	reqs := make([]module.Version, len(f.Require))
 	for i, r := range f.Require {
 		reqs[i] = r.Mod
-	}
-	if f.Go != nil {
-		reqs = append(reqs, module.Version{Path: "go", Version: f.Go.Version})
-	}
-	if f.Toolchain != nil {
-		reqs = append(reqs, module.Version{Path: "toolchain", Version: f.Toolchain.Name})
 	}
 	return reqs
 }

@@ -15,7 +15,6 @@ import (
 // matcher sanitizes, uniques, and filters names of subtests and subbenchmarks.
 type matcher struct {
 	filter    filterMatch
-	skip      filterMatch
 	matchFunc func(pat, str string) (bool, error)
 
 	mu sync.Mutex
@@ -48,33 +47,17 @@ type alternationMatch []filterMatch
 // eliminate this Mutex.
 var matchMutex sync.Mutex
 
-func allMatcher() *matcher {
-	return newMatcher(nil, "", "", "")
-}
-
-func newMatcher(matchString func(pat, str string) (bool, error), patterns, name, skips string) *matcher {
-	var filter, skip filterMatch
-	if patterns == "" {
-		filter = simpleMatch{} // always partial true
-	} else {
-		filter = splitRegexp(patterns)
-		if err := filter.verify(name, matchString); err != nil {
+func newMatcher(matchString func(pat, str string) (bool, error), patterns, name string) *matcher {
+	var impl filterMatch
+	if patterns != "" {
+		impl = splitRegexp(patterns)
+		if err := impl.verify(name, matchString); err != nil {
 			fmt.Fprintf(os.Stderr, "testing: invalid regexp for %s\n", err)
 			os.Exit(1)
 		}
 	}
-	if skips == "" {
-		skip = alternationMatch{} // always false
-	} else {
-		skip = splitRegexp(skips)
-		if err := skip.verify("-test.skip", matchString); err != nil {
-			fmt.Fprintf(os.Stderr, "testing: invalid regexp for %v\n", err)
-			os.Exit(1)
-		}
-	}
 	return &matcher{
-		filter:    filter,
-		skip:      skip,
+		filter:    impl,
 		matchFunc: matchString,
 		subNames:  map[string]int32{},
 	}
@@ -93,23 +76,14 @@ func (m *matcher) fullName(c *common, subname string) (name string, ok, partial 
 	matchMutex.Lock()
 	defer matchMutex.Unlock()
 
-	// We check the full array of paths each time to allow for the case that a pattern contains a '/'.
+	if m.filter == nil {
+		return name, true, false
+	}
+
+	// We check the full array of paths each time to allow for the case that
+	// a pattern contains a '/'.
 	elem := strings.Split(name, "/")
-
-	// filter must match.
-	// accept partial match that may produce full match later.
 	ok, partial = m.filter.matches(elem, m.matchFunc)
-	if !ok {
-		return name, false, false
-	}
-
-	// skip must not match.
-	// ignore partial match so we can get to more precise match later.
-	skip, partialSkip := m.skip.matches(elem, m.matchFunc)
-	if skip && !partialSkip {
-		return name, false, false
-	}
-
 	return name, ok, partial
 }
 

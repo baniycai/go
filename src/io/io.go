@@ -74,9 +74,6 @@ var ErrNoProgress = errors.New("multiple Read calls return no data or error")
 // that happen after reading some bytes and also both of the
 // allowed EOF behaviors.
 //
-// If len(p) == 0, Read should always return n == 0. It may return a
-// non-nil error if some error condition is known, such as EOF.
-//
 // Implementations of Read are discouraged from returning a
 // zero byte count with a nil error, except when len(p) == 0.
 // Callers should treat a return of 0 and nil as indicating that
@@ -97,6 +94,8 @@ type Reader interface {
 //
 // Implementations must not retain p.
 type Writer interface {
+	// Write 没意思，这个方法的实现无外乎都是调用syscall.xxx,而这个xxx方法中又调用了libc_xxx方法，这个libc_xxx又是跟某个汇编文件中的语句关联起来的，这个关联的语句是去调用对应的C方法
+	// 有一个注意点，最后go传给c的参数都是uintptr类型的，这个大概率是变量或者函数的地址值，主要是C那边操作指针要用到叭
 	Write(p []byte) (n int, err error)
 }
 
@@ -558,50 +557,6 @@ func (s *SectionReader) ReadAt(p []byte, off int64) (n int, err error) {
 // Size returns the size of the section in bytes.
 func (s *SectionReader) Size() int64 { return s.limit - s.base }
 
-// An OffsetWriter maps writes at offset base to offset base+off in the underlying writer.
-type OffsetWriter struct {
-	w    WriterAt
-	base int64 // the original offset
-	off  int64 // the current offset
-}
-
-// NewOffsetWriter returns an OffsetWriter that writes to w
-// starting at offset off.
-func NewOffsetWriter(w WriterAt, off int64) *OffsetWriter {
-	return &OffsetWriter{w, off, off}
-}
-
-func (o *OffsetWriter) Write(p []byte) (n int, err error) {
-	n, err = o.w.WriteAt(p, o.off)
-	o.off += int64(n)
-	return
-}
-
-func (o *OffsetWriter) WriteAt(p []byte, off int64) (n int, err error) {
-	if off < 0 {
-		return 0, errOffset
-	}
-
-	off += o.base
-	return o.w.WriteAt(p, off)
-}
-
-func (o *OffsetWriter) Seek(offset int64, whence int) (int64, error) {
-	switch whence {
-	default:
-		return 0, errWhence
-	case SeekStart:
-		offset += o.base
-	case SeekCurrent:
-		offset += o.off
-	}
-	if offset < o.base {
-		return 0, errOffset
-	}
-	o.off = offset
-	return offset - o.base, nil
-}
-
 // TeeReader returns a Reader that writes to w what it reads from r.
 // All reads from r performed through it are matched with
 // corresponding writes to w. There is no internal buffering -
@@ -701,6 +656,10 @@ func (c nopCloserWriterTo) WriteTo(w Writer) (n int64, err error) {
 func ReadAll(r Reader) ([]byte, error) {
 	b := make([]byte, 0, 512)
 	for {
+		if len(b) == cap(b) {
+			// Add more capacity (let append pick how much).
+			b = append(b, 0)[:len(b)]
+		}
 		n, err := r.Read(b[len(b):cap(b)])
 		b = b[:len(b)+n]
 		if err != nil {
@@ -708,11 +667,6 @@ func ReadAll(r Reader) ([]byte, error) {
 				err = nil
 			}
 			return b, err
-		}
-
-		if len(b) == cap(b) {
-			// Add more capacity (let append pick how much).
-			b = append(b, 0)[:len(b)]
 		}
 	}
 }

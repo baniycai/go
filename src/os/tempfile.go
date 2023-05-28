@@ -117,7 +117,7 @@ func joinPath(dir, name string) string {
 	return dir + string(PathSeparator) + name
 }
 
-// lastIndex from the strings package.
+// LastIndexByte from the strings package.
 func lastIndex(s string, sep byte) int {
 	for i := len(s) - 1; i >= 0; i-- {
 		if s[i] == sep {

@@ -18,7 +18,6 @@ func myfunc(c string) {
 
 //go:noinline
 func test2(a interface{}) {
-	_ = a.(string)
 }
 
 func main() {

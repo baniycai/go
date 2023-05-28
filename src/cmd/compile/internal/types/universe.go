@@ -46,19 +46,19 @@ func InitTypes(defTypeName func(sym *Sym, typ *Type) Object) {
 	}
 
 	SlicePtrOffset = 0
-	SliceLenOffset = RoundUp(SlicePtrOffset+int64(PtrSize), int64(PtrSize))
-	SliceCapOffset = RoundUp(SliceLenOffset+int64(PtrSize), int64(PtrSize))
-	SliceSize = RoundUp(SliceCapOffset+int64(PtrSize), int64(PtrSize))
+	SliceLenOffset = Rnd(SlicePtrOffset+int64(PtrSize), int64(PtrSize))
+	SliceCapOffset = Rnd(SliceLenOffset+int64(PtrSize), int64(PtrSize))
+	SliceSize = Rnd(SliceCapOffset+int64(PtrSize), int64(PtrSize))
 
 	// string is same as slice wo the cap
-	StringSize = RoundUp(SliceLenOffset+int64(PtrSize), int64(PtrSize))
+	StringSize = Rnd(SliceLenOffset+int64(PtrSize), int64(PtrSize))
 
 	for et := Kind(0); et < NTYPE; et++ {
 		SimType[et] = et
 	}
 
 	Types[TANY] = newType(TANY) // note: an old placeholder type, NOT the new builtin 'any' alias for interface{}
-	Types[TINTER] = NewInterface(nil)
+	Types[TINTER] = NewInterface(LocalPkg, nil, false)
 	CheckSize(Types[TINTER])
 
 	defBasic := func(kind Kind, pkg *Pkg, name string) *Type {
@@ -111,7 +111,7 @@ func InitTypes(defTypeName func(sym *Sym, typ *Type) Object) {
 	// any type (interface)
 	DeferCheckSize()
 	AnyType = defBasic(TFORW, BuiltinPkg, "any")
-	AnyType.SetUnderlying(NewInterface(nil))
+	AnyType.SetUnderlying(NewInterface(BuiltinPkg, []*Field{}, false))
 	ResumeCheckSize()
 
 	Types[TUNSAFEPTR] = defBasic(TUNSAFEPTR, UnsafePkg, "Pointer")
@@ -140,15 +140,15 @@ func InitTypes(defTypeName func(sym *Sym, typ *Type) Object) {
 }
 
 func makeErrorInterface() *Type {
-	sig := NewSignature(FakeRecv(), nil, []*Field{
+	sig := NewSignature(NoPkg, FakeRecv(), nil, nil, []*Field{
 		NewField(src.NoXPos, nil, Types[TSTRING]),
 	})
 	method := NewField(src.NoXPos, LocalPkg.Lookup("Error"), sig)
-	return NewInterface([]*Field{method})
+	return NewInterface(NoPkg, []*Field{method}, false)
 }
 
 // makeComparableInterface makes the predefined "comparable" interface in the
 // built-in package. It has a unique name, but no methods.
 func makeComparableInterface() *Type {
-	return NewInterface(nil)
+	return NewInterface(NoPkg, nil, false)
 }

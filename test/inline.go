@@ -10,7 +10,6 @@
 package foo
 
 import (
-	"errors"
 	"runtime"
 	"unsafe"
 )
@@ -55,8 +54,6 @@ func f2() int { // ERROR "can inline f2"
 	tmp2 := tmp1
 	return tmp2(0) // ERROR "inlining call to h"
 }
-
-var abc = errors.New("abc") // ERROR "inlining call to errors.New"
 
 var somethingWrong error
 
@@ -115,11 +112,11 @@ func r(z int) int {
 		return x + z
 	}
 	bar := func(x int) int { // ERROR "func literal does not escape" "can inline r.func2"
-		return x + func(y int) int { // ERROR "can inline r.func2.1" "can inline r.r.func2.func3"
+		return x + func(y int) int { // ERROR "can inline r.func2.1" "can inline r.func3"
 			return 2*y + x*z
 		}(x) // ERROR "inlining call to r.func2.1"
 	}
-	return foo(42) + bar(42) // ERROR "inlining call to r.func1" "inlining call to r.func2" "inlining call to r.r.func2.func3"
+	return foo(42) + bar(42) // ERROR "inlining call to r.func1" "inlining call to r.func2" "inlining call to r.func3"
 }
 
 func s0(x int) int { // ERROR "can inline s0"
@@ -207,20 +204,6 @@ func switchConst3() string { // ERROR "can inline switchConst3"
 		return "oh nose!"
 	}
 }
-func switchConst4() { // ERROR "can inline switchConst4"
-	const intSize = 32 << (^uint(0) >> 63)
-	want := func() string { // ERROR "can inline switchConst4.func1"
-		switch intSize {
-		case 32:
-			return "32"
-		case 64:
-			return "64"
-		default:
-			panic("unreachable")
-		}
-	}() // ERROR "inlining call to switchConst4.func1"
-	_ = want
-}
 
 func inlineRangeIntoMe(data []int) { // ERROR "can inline inlineRangeIntoMe" "data does not escape"
 	rangeFunc(data, 12) // ERROR "inlining call to rangeFunc"
@@ -272,13 +255,13 @@ func ff(x int) { // ERROR "can inline ff"
 	if x < 0 {
 		return
 	}
-	gg(x - 1) // ERROR "inlining call to gg" "inlining call to hh"
+	gg(x - 1)
 }
 func gg(x int) { // ERROR "can inline gg"
-	hh(x - 1) // ERROR "inlining call to hh" "inlining call to ff"
+	hh(x - 1)
 }
 func hh(x int) { // ERROR "can inline hh"
-	ff(x - 1) // ERROR "inlining call to ff" "inlining call to gg"
+	ff(x - 1) // ERROR "inlining call to ff"  // ERROR "inlining call to gg"
 }
 
 // Issue #14768 - make sure we can inline for loops.

@@ -14,7 +14,8 @@ func f32(a []int32, i uint32) {
                 i = uint32(p) * (uint32(p) & (i & 1))
                 return 1
         }
-        // ppc64x: -"RLWNIM"
+        // ppc64le: -"RLWNIM"
+        // ppc64: -"RLWNIM"
         a[0] = g(8) >> 1
 }
 
@@ -23,6 +24,7 @@ func f(a []int, i uint) {
 		i = uint(p) * (uint(p) & (i & 1))
 		return 1
 	}
-	// ppc64x: -"RLDIC"
+	// ppc64le: -"RLDIC"
+	// ppc64: -"RLDIC"
 	a[0] = g(8) >> 1
 }

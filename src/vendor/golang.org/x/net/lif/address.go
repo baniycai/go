@@ -9,7 +9,6 @@ package lif
 
 import (
 	"errors"
-	"syscall"
 	"unsafe"
 )
 
@@ -26,7 +25,7 @@ type Inet4Addr struct {
 }
 
 // Family implements the Family method of Addr interface.
-func (a *Inet4Addr) Family() int { return syscall.AF_INET }
+func (a *Inet4Addr) Family() int { return sysAF_INET }
 
 // An Inet6Addr represents an internet address for IPv6.
 type Inet6Addr struct {
@@ -36,7 +35,7 @@ type Inet6Addr struct {
 }
 
 // Family implements the Family method of Addr interface.
-func (a *Inet6Addr) Family() int { return syscall.AF_INET6 }
+func (a *Inet6Addr) Family() int { return sysAF_INET6 }
 
 // Addrs returns a list of interface addresses.
 //
@@ -63,7 +62,7 @@ func Addrs(af int, name string) ([]Addr, error) {
 			lifr.Name[i] = int8(ll.Name[i])
 		}
 		for _, ep := range eps {
-			ioc := int64(syscall.SIOCGLIFADDR)
+			ioc := int64(sysSIOCGLIFADDR)
 			err := ioctl(ep.s, uintptr(ioc), unsafe.Pointer(&lifr))
 			if err != nil {
 				continue
@@ -74,11 +73,11 @@ func Addrs(af int, name string) ([]Addr, error) {
 				continue
 			}
 			switch sa.Family {
-			case syscall.AF_INET:
+			case sysAF_INET:
 				a := &Inet4Addr{PrefixLen: l}
 				copy(a.IP[:], lifr.Lifru[4:8])
 				as = append(as, a)
-			case syscall.AF_INET6:
+			case sysAF_INET6:
 				a := &Inet6Addr{PrefixLen: l, ZoneID: int(nativeEndian.Uint32(lifr.Lifru[24:28]))}
 				copy(a.IP[:], lifr.Lifru[8:24])
 				as = append(as, a)

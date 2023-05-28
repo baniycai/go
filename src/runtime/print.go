@@ -6,6 +6,7 @@ package runtime
 
 import (
 	"internal/goarch"
+	"runtime/internal/atomic"
 	"unsafe"
 )
 
@@ -35,11 +36,11 @@ var (
 //
 // The text written during a process crash (following "panic" or "fatal
 // error") is not saved, since the goroutine stacks will generally be readable
-// from the runtime data structures in the core file.
+// from the runtime datastructures in the core file.
 func recordForPanic(b []byte) {
 	printlock()
 
-	if panicking.Load() == 0 {
+	if atomic.Load(&panicking) == 0 {
 		// Not actively crashing: maintain circular buffer of print output.
 		for i := 0; i < len(b); {
 			n := copy(printBacklog[printBacklogIndex:], b[i:])

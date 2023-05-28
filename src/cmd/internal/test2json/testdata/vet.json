@@ -1,4 +1,3 @@
-{"Action":"start"}
 {"Action":"run","Test":"TestVet"}
 {"Action":"output","Test":"TestVet","Output":"=== RUN   TestVet\n"}
 {"Action":"output","Test":"TestVet","Output":"=== PAUSE TestVet\n"}

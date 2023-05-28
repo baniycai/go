@@ -62,7 +62,6 @@ func interfaceTable(ifindex int) ([]Interface, error) {
 			}
 			if aa.OperStatus == windows.IfOperStatusUp {
 				ifi.Flags |= FlagUp
-				ifi.Flags |= FlagRunning
 			}
 			// For now we need to infer link-layer service
 			// capabilities from media types.

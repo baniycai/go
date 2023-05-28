@@ -8,7 +8,9 @@ import (
 	"bytes"
 	"fmt"
 	"internal/testenv"
+	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"testing"
@@ -25,7 +27,7 @@ func TestLarge(t *testing.T) {
 	}
 	testenv.MustHaveGoBuild(t)
 
-	dir, err := os.MkdirTemp("", "testlarge")
+	dir, err := ioutil.TempDir("", "testlarge")
 	if err != nil {
 		t.Fatalf("could not create directory: %v", err)
 	}
@@ -36,7 +38,7 @@ func TestLarge(t *testing.T) {
 	gen(buf)
 
 	tmpfile := filepath.Join(dir, "x.s")
-	err = os.WriteFile(tmpfile, buf.Bytes(), 0644)
+	err = ioutil.WriteFile(tmpfile, buf.Bytes(), 0644)
 	if err != nil {
 		t.Fatalf("can't write output: %v\n", err)
 	}
@@ -44,7 +46,7 @@ func TestLarge(t *testing.T) {
 	pattern := `0x0080\s00128\s\(.*\)\tMOVD\t\$3,\sR3`
 
 	// assemble generated file
-	cmd := testenv.Command(t, testenv.GoToolPath(t), "tool", "asm", "-S", "-o", filepath.Join(dir, "test.o"), tmpfile)
+	cmd := exec.Command(testenv.GoToolPath(t), "tool", "asm", "-S", "-o", filepath.Join(dir, "test.o"), tmpfile)
 	cmd.Env = append(os.Environ(), "GOOS=linux")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -59,7 +61,7 @@ func TestLarge(t *testing.T) {
 	}
 
 	// build generated file
-	cmd = testenv.Command(t, testenv.GoToolPath(t), "tool", "asm", "-o", filepath.Join(dir, "x.o"), tmpfile)
+	cmd = exec.Command(testenv.GoToolPath(t), "tool", "asm", "-o", filepath.Join(dir, "x.o"), tmpfile)
 	cmd.Env = append(os.Environ(), "GOOS=linux")
 	out, err = cmd.CombinedOutput()
 	if err != nil {
@@ -84,16 +86,16 @@ func gen(buf *bytes.Buffer) {
 
 // Issue 20348.
 func TestNoRet(t *testing.T) {
-	dir, err := os.MkdirTemp("", "testnoret")
+	dir, err := ioutil.TempDir("", "testnoret")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
 	tmpfile := filepath.Join(dir, "x.s")
-	if err := os.WriteFile(tmpfile, []byte("TEXT ·stub(SB),$0-0\nNOP\n"), 0644); err != nil {
+	if err := ioutil.WriteFile(tmpfile, []byte("TEXT ·stub(SB),$0-0\nNOP\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	cmd := testenv.Command(t, testenv.GoToolPath(t), "tool", "asm", "-o", filepath.Join(dir, "x.o"), tmpfile)
+	cmd := exec.Command(testenv.GoToolPath(t), "tool", "asm", "-o", filepath.Join(dir, "x.o"), tmpfile)
 	cmd.Env = append(os.Environ(), "GOOS=linux")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Errorf("%v\n%s", err, out)
@@ -104,7 +106,7 @@ func TestNoRet(t *testing.T) {
 // code can be aligned to the alignment value.
 func TestPCALIGN(t *testing.T) {
 	testenv.MustHaveGoBuild(t)
-	dir, err := os.MkdirTemp("", "testpcalign")
+	dir, err := ioutil.TempDir("", "testpcalign")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,10 +130,10 @@ func TestPCALIGN(t *testing.T) {
 	}
 
 	for _, test := range testCases {
-		if err := os.WriteFile(tmpfile, test.code, 0644); err != nil {
+		if err := ioutil.WriteFile(tmpfile, test.code, 0644); err != nil {
 			t.Fatal(err)
 		}
-		cmd := testenv.Command(t, testenv.GoToolPath(t), "tool", "asm", "-S", "-o", tmpout, tmpfile)
+		cmd := exec.Command(testenv.GoToolPath(t), "tool", "asm", "-S", "-o", tmpout, tmpfile)
 		cmd.Env = append(os.Environ(), "GOOS=linux")
 		out, err := cmd.CombinedOutput()
 		if err != nil {

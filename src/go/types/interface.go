@@ -7,7 +7,6 @@ package types
 import (
 	"go/ast"
 	"go/token"
-	. "internal/types/errors"
 )
 
 // ----------------------------------------------------------------------------
@@ -26,7 +25,7 @@ type Interface struct {
 }
 
 // typeSet returns the type set for interface t.
-func (t *Interface) typeSet() *_TypeSet { return computeInterfaceTypeSet(t.check, nopos, t) }
+func (t *Interface) typeSet() *_TypeSet { return computeInterfaceTypeSet(t.check, token.NoPos, t) }
 
 // emptyInterface represents the empty (completed) interface
 var emptyInterface = Interface{complete: true, tset: &topTypeSet}
@@ -174,7 +173,7 @@ func (check *Checker) interfaceType(ityp *Interface, iface *ast.InterfaceType, d
 		// We have a method with name f.Names[0].
 		name := f.Names[0]
 		if name.Name == "_" {
-			check.error(name, BlankIfaceMethod, "methods must have a unique non-blank name")
+			check.errorf(name, _BlankIfaceMethod, "methods must have a unique non-blank name")
 			continue // ignore
 		}
 
@@ -182,7 +181,7 @@ func (check *Checker) interfaceType(ityp *Interface, iface *ast.InterfaceType, d
 		sig, _ := typ.(*Signature)
 		if sig == nil {
 			if typ != Typ[Invalid] {
-				check.errorf(f.Type, InvalidSyntaxTree, "%s is not a method signature", typ)
+				check.invalidAST(f.Type, "%s is not a method signature", typ)
 			}
 			continue // ignore
 		}
@@ -195,7 +194,7 @@ func (check *Checker) interfaceType(ityp *Interface, iface *ast.InterfaceType, d
 			if ftyp, _ := f.Type.(*ast.FuncType); ftyp != nil && ftyp.TypeParams != nil {
 				at = ftyp.TypeParams
 			}
-			check.error(at, InvalidMethodTypeParams, "methods cannot have type parameters")
+			check.errorf(at, _InvalidMethodTypeParams, "methods cannot have type parameters")
 		}
 
 		// use named receiver type if available (for better error messages)

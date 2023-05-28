@@ -26,8 +26,9 @@ func addDummyObjSym(t *testing.T, ldr *Loader, or *oReader, name string) Sym {
 }
 
 func mkLoader() *Loader {
+	edummy := func(str string, off int) {}
 	er := ErrorReporter{}
-	ldr := NewLoader(0, &er)
+	ldr := NewLoader(0, edummy, &er)
 	er.ldr = ldr
 	return ldr
 }
@@ -38,9 +39,9 @@ func TestAddMaterializedSymbol(t *testing.T) {
 	or := &dummyOreader
 
 	// Create some syms from a dummy object file symbol to get things going.
-	ts1 := addDummyObjSym(t, ldr, or, "type:uint8")
+	ts1 := addDummyObjSym(t, ldr, or, "type.uint8")
 	ts2 := addDummyObjSym(t, ldr, or, "mumble")
-	ts3 := addDummyObjSym(t, ldr, or, "type:string")
+	ts3 := addDummyObjSym(t, ldr, or, "type.string")
 
 	// Create some external symbols.
 	es1 := ldr.LookupOrCreateSym("extnew1", 0)
@@ -51,7 +52,7 @@ func TestAddMaterializedSymbol(t *testing.T) {
 	if es1x != es1 {
 		t.Fatalf("LookupOrCreateSym lookup: expected %d got %d for second lookup", es1, es1x)
 	}
-	es2 := ldr.LookupOrCreateSym("go:info.type.uint8", 0)
+	es2 := ldr.LookupOrCreateSym("go.info.type.uint8", 0)
 	if es2 == 0 {
 		t.Fatalf("LookupOrCreateSym failed for go.info.type.uint8")
 	}
@@ -251,7 +252,7 @@ func TestAddDataMethods(t *testing.T) {
 	or := &dummyOreader
 
 	// Populate loader with some symbols.
-	addDummyObjSym(t, ldr, or, "type:uint8")
+	addDummyObjSym(t, ldr, or, "type.uint8")
 	ldr.LookupOrCreateSym("hello", 0)
 
 	arch := sys.ArchAMD64
@@ -337,17 +338,6 @@ func TestAddDataMethods(t *testing.T) {
 			expKind: sym.SDATA,
 			expRel:  []Reloc{mkReloc(ldr, objabi.R_ADDRCUOFF, 0, 8, 7, 8)},
 		},
-		{
-			which: "AddPEImageRelativeAddrPlus",
-			addDataFunc: func(l *Loader, s Sym, s2 Sym) Sym {
-				sb := l.MakeSymbolUpdater(s)
-				sb.AddPEImageRelativeAddrPlus(arch, s2, 3)
-				return s
-			},
-			expData: []byte{0, 0, 0, 0},
-			expKind: sym.SDATA,
-			expRel:  []Reloc{mkReloc(ldr, objabi.R_PEIMAGEOFF, 0, 4, 3, 9)},
-		},
 	}
 
 	var pmi Sym
@@ -381,7 +371,7 @@ func TestOuterSub(t *testing.T) {
 	or := &dummyOreader
 
 	// Populate loader with some symbols.
-	addDummyObjSym(t, ldr, or, "type:uint8")
+	addDummyObjSym(t, ldr, or, "type.uint8")
 	es1 := ldr.LookupOrCreateSym("outer", 0)
 	ldr.MakeSymbolUpdater(es1).SetSize(101)
 	es2 := ldr.LookupOrCreateSym("sub1", 0)

@@ -8,8 +8,8 @@ package runtime
 
 import "runtime/internal/atomic"
 
-var netpollInited atomic.Uint32
-var netpollWaiters atomic.Uint32
+var netpollInited uint32
+var netpollWaiters uint32
 
 var netpollStubLock mutex
 var netpollNote note
@@ -19,7 +19,7 @@ var netpollBrokenLock mutex
 var netpollBroken bool
 
 func netpollGenericInit() {
-	netpollInited.Store(1)
+	atomic.Store(&netpollInited, 1)
 }
 
 func netpollBreak() {
@@ -57,5 +57,5 @@ func netpoll(delay int64) gList {
 }
 
 func netpollinited() bool {
-	return netpollInited.Load() != 0
+	return atomic.Load(&netpollInited) != 0
 }

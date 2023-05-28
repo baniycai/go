@@ -147,7 +147,7 @@ func TestUserTaskRegion(t *testing.T) {
 		pretty := func(data []testData) string {
 			var s strings.Builder
 			for _, d := range data {
-				fmt.Fprintf(&s, "\t%+v\n", d)
+				s.WriteString(fmt.Sprintf("\t%+v\n", d))
 			}
 			return s.String()
 		}

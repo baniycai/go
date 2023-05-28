@@ -22,18 +22,20 @@ import (
 // This means that clients need to be able to cope with cache entries
 // disappearing, but it also means that clients don't need to worry about
 // cache entries keeping the keys from being collected.
-type Cache[K, V any] struct {
+//
+// TODO(rsc): Make Cache generic once consumers can handle that.
+type Cache struct {
+	// ptable is an atomic *[cacheSize]unsafe.Pointer,
+	// where each unsafe.Pointer is an atomic *cacheEntry.
 	// The runtime atomically stores nil to ptable at the start of each GC.
-	ptable atomic.Pointer[cacheTable[K, V]]
+	ptable unsafe.Pointer
 }
 
-type cacheTable[K, V any] [cacheSize]atomic.Pointer[cacheEntry[K, V]]
-
 // A cacheEntry is a single entry in the linked list for a given hash table entry.
-type cacheEntry[K, V any] struct {
-	k    *K                // immutable once created
-	v    atomic.Pointer[V] // read and written atomically to allow updates
-	next *cacheEntry[K, V] // immutable once linked into table
+type cacheEntry struct {
+	k    unsafe.Pointer // immutable once created
+	v    unsafe.Pointer // read and written atomically to allow updates
+	next *cacheEntry    // immutable once linked into table
 }
 
 func registerCache(unsafe.Pointer) // provided by runtime
@@ -41,7 +43,7 @@ func registerCache(unsafe.Pointer) // provided by runtime
 // Register registers the cache with the runtime,
 // so that c.ptable can be cleared at the start of each GC.
 // Register must be called during package initialization.
-func (c *Cache[K, V]) Register() {
+func (c *Cache) Register() {
 	registerCache(unsafe.Pointer(&c.ptable))
 }
 
@@ -52,45 +54,45 @@ const cacheSize = 1021
 
 // table returns a pointer to the current cache hash table,
 // coping with the possibility of the GC clearing it out from under us.
-func (c *Cache[K, V]) table() *cacheTable[K, V] {
+func (c *Cache) table() *[cacheSize]unsafe.Pointer {
 	for {
-		p := c.ptable.Load()
+		p := atomic.LoadPointer(&c.ptable)
 		if p == nil {
-			p = new(cacheTable[K, V])
-			if !c.ptable.CompareAndSwap(nil, p) {
+			p = unsafe.Pointer(new([cacheSize]unsafe.Pointer))
+			if !atomic.CompareAndSwapPointer(&c.ptable, nil, p) {
 				continue
 			}
 		}
-		return p
+		return (*[cacheSize]unsafe.Pointer)(p)
 	}
 }
 
 // Clear clears the cache.
 // The runtime does this automatically at each garbage collection;
 // this method is exposed only for testing.
-func (c *Cache[K, V]) Clear() {
+func (c *Cache) Clear() {
 	// The runtime does this at the start of every garbage collection
 	// (itself, not by calling this function).
-	c.ptable.Store(nil)
+	atomic.StorePointer(&c.ptable, nil)
 }
 
 // Get returns the cached value associated with v,
 // which is either the value v corresponding to the most recent call to Put(k, v)
 // or nil if that cache entry has been dropped.
-func (c *Cache[K, V]) Get(k *K) *V {
-	head := &c.table()[uintptr(unsafe.Pointer(k))%cacheSize]
-	e := head.Load()
+func (c *Cache) Get(k unsafe.Pointer) unsafe.Pointer {
+	head := &c.table()[uintptr(k)%cacheSize]
+	e := (*cacheEntry)(atomic.LoadPointer(head))
 	for ; e != nil; e = e.next {
 		if e.k == k {
-			return e.v.Load()
+			return atomic.LoadPointer(&e.v)
 		}
 	}
 	return nil
 }
 
 // Put sets the cached value associated with k to v.
-func (c *Cache[K, V]) Put(k *K, v *V) {
-	head := &c.table()[uintptr(unsafe.Pointer(k))%cacheSize]
+func (c *Cache) Put(k, v unsafe.Pointer) {
+	head := &c.table()[uintptr(k)%cacheSize]
 
 	// Strategy is to walk the linked list at head,
 	// same as in Get, to look for existing entry.
@@ -110,21 +112,20 @@ func (c *Cache[K, V]) Put(k *K, v *V) {
 	//
 	//  2. We only allocate the entry to be added once,
 	//     saving it in add for the next attempt.
-	var add, noK *cacheEntry[K, V]
+	var add, noK *cacheEntry
 	n := 0
 	for {
-		e := head.Load()
+		e := (*cacheEntry)(atomic.LoadPointer(head))
 		start := e
 		for ; e != nil && e != noK; e = e.next {
 			if e.k == k {
-				e.v.Store(v)
+				atomic.StorePointer(&e.v, v)
 				return
 			}
 			n++
 		}
 		if add == nil {
-			add = &cacheEntry[K, V]{k: k}
-			add.v.Store(v)
+			add = &cacheEntry{k, v, nil}
 		}
 		add.next = start
 		if n >= 1000 {
@@ -132,7 +133,7 @@ func (c *Cache[K, V]) Put(k *K, v *V) {
 			// throw it away to avoid quadratic lookup behavior.
 			add.next = nil
 		}
-		if head.CompareAndSwap(start, add) {
+		if atomic.CompareAndSwapPointer(head, unsafe.Pointer(start), unsafe.Pointer(add)) {
 			return
 		}
 		noK = start

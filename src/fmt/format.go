@@ -21,19 +21,19 @@ const (
 
 // flags placed in a separate struct for easy clearing.
 type fmtFlags struct {
-	widPresent  bool
+	widPresent  bool // 是否限制占位符被替换后的位置的长度(todo)
 	precPresent bool
-	minus       bool
-	plus        bool
-	sharp       bool
-	space       bool
-	zero        bool
+	minus       bool // '-'
+	plus        bool // '+'
+	sharp       bool // '#'
+	space       bool // ' '
+	zero        bool // '0'
 
 	// For the formats %+v %#v, we set the plusV/sharpV flags
 	// and clear the plus/sharp flags since %+v and %#v are in effect
 	// different, flagless formats set at the top level.
-	plusV  bool
-	sharpV bool
+	plusV  bool // '#'和'+'同时出现时为true,此时将plus置为false
+	sharpV bool // '#'和'v'同时出现时为true,此时将sharp置为false
 }
 
 // A fmt is the raw formatter used by Printf etc.
@@ -43,7 +43,7 @@ type fmt struct {
 
 	fmtFlags
 
-	wid  int // width
+	wid  int // width   限制的占位符被替换后的位置的长度
 	prec int // precision
 
 	// intbuf is large enough to store %b of an int64 with a sign and
@@ -110,7 +110,8 @@ func (f *fmt) padString(s string) {
 		f.buf.writeString(s)
 		return
 	}
-	width := f.wid - utf8.RuneCountInString(s)
+	width := f.wid - utf8.RuneCountInString(s) // 得到需要补充的长度
+	// '-'决定要补空在左边还是右边
 	if !f.minus {
 		// left padding
 		f.writePadding(width)
@@ -461,14 +462,13 @@ func (f *fmt) fmtQ(s string) {
 // fmtC formats an integer as a Unicode character.
 // If the character is not valid Unicode, it will print '\ufffd'.
 func (f *fmt) fmtC(c uint64) {
-	// Explicitly check whether c exceeds utf8.MaxRune since the conversion
-	// of a uint64 to a rune may lose precision that indicates an overflow.
 	r := rune(c)
 	if c > utf8.MaxRune {
 		r = utf8.RuneError
 	}
 	buf := f.intbuf[:0]
-	f.pad(utf8.AppendRune(buf, r))
+	w := utf8.EncodeRune(buf[:utf8.UTFMax], r)
+	f.pad(buf[:w])
 }
 
 // fmtQc formats an integer as a single-quoted, escaped Go character constant.

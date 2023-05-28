@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build !js && !wasip1
+//go:build !js
 
 package net
 
@@ -300,7 +300,6 @@ func checkMulticastStats(ifStats *ifStats, uniStats, multiStats *routeStats) err
 }
 
 func BenchmarkInterfaces(b *testing.B) {
-	b.ReportAllocs()
 	testHookUninstaller.Do(uninstallTestHooks)
 
 	for i := 0; i < b.N; i++ {
@@ -311,7 +310,6 @@ func BenchmarkInterfaces(b *testing.B) {
 }
 
 func BenchmarkInterfaceByIndex(b *testing.B) {
-	b.ReportAllocs()
 	testHookUninstaller.Do(uninstallTestHooks)
 
 	ifi := loopbackInterface()
@@ -326,7 +324,6 @@ func BenchmarkInterfaceByIndex(b *testing.B) {
 }
 
 func BenchmarkInterfaceByName(b *testing.B) {
-	b.ReportAllocs()
 	testHookUninstaller.Do(uninstallTestHooks)
 
 	ifi := loopbackInterface()
@@ -341,7 +338,6 @@ func BenchmarkInterfaceByName(b *testing.B) {
 }
 
 func BenchmarkInterfaceAddrs(b *testing.B) {
-	b.ReportAllocs()
 	testHookUninstaller.Do(uninstallTestHooks)
 
 	for i := 0; i < b.N; i++ {
@@ -352,7 +348,6 @@ func BenchmarkInterfaceAddrs(b *testing.B) {
 }
 
 func BenchmarkInterfacesAndAddrs(b *testing.B) {
-	b.ReportAllocs()
 	testHookUninstaller.Do(uninstallTestHooks)
 
 	ifi := loopbackInterface()
@@ -367,7 +362,6 @@ func BenchmarkInterfacesAndAddrs(b *testing.B) {
 }
 
 func BenchmarkInterfacesAndMulticastAddrs(b *testing.B) {
-	b.ReportAllocs()
 	testHookUninstaller.Do(uninstallTestHooks)
 
 	ifi := loopbackInterface()

@@ -851,7 +851,9 @@ func (d *parseDoc) docLink(text, before, after string) (link *DocLink, ok bool) 
 			return nil, false
 		}
 	}
-	text = strings.TrimPrefix(text, "*")
+	if strings.HasPrefix(text, "*") {
+		text = text[1:]
+	}
 	pkg, name, ok := splitDocName(text)
 	var recv string
 	if ok {

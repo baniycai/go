@@ -116,8 +116,12 @@ func TestResolveIdents(t *testing.T) {
 
 	// parse package files
 	var files []*syntax.File
-	for _, src := range sources {
-		files = append(files, mustParse(src))
+	for i, src := range sources {
+		f, err := parseSrc(fmt.Sprintf("sources[%d]", i), src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, f)
 	}
 
 	// resolve and type-check package AST
@@ -139,23 +143,23 @@ func TestResolveIdents(t *testing.T) {
 
 	// check that qualified identifiers are resolved
 	for _, f := range files {
-		syntax.Inspect(f, func(n syntax.Node) bool {
+		syntax.Crawl(f, func(n syntax.Node) bool {
 			if s, ok := n.(*syntax.SelectorExpr); ok {
 				if x, ok := s.X.(*syntax.Name); ok {
 					obj := uses[x]
 					if obj == nil {
 						t.Errorf("%s: unresolved qualified identifier %s", x.Pos(), x.Value)
-						return false
+						return true
 					}
 					if _, ok := obj.(*PkgName); ok && uses[s.Sel] == nil {
 						t.Errorf("%s: unresolved selector %s", s.Sel.Pos(), s.Sel.Value)
-						return false
+						return true
 					}
-					return false
+					return true
 				}
 				return true
 			}
-			return true
+			return false
 		})
 	}
 
@@ -166,14 +170,14 @@ func TestResolveIdents(t *testing.T) {
 	}
 
 	// Check that each identifier in the source is found in uses or defs or both.
-	// We need the foundUses/Defs maps (rather than just deleting the found objects
+	// We need the foundUses/Defs maps (rather then just deleting the found objects
 	// from the uses and defs maps) because syntax.Walk traverses shared nodes multiple
 	// times (e.g. types in field lists such as "a, b, c int").
 	foundUses := make(map[*syntax.Name]bool)
 	foundDefs := make(map[*syntax.Name]bool)
 	var both []string
 	for _, f := range files {
-		syntax.Inspect(f, func(n syntax.Node) bool {
+		syntax.Crawl(f, func(n syntax.Node) bool {
 			if x, ok := n.(*syntax.Name); ok {
 				var objects int
 				if _, found := uses[x]; found {
@@ -190,9 +194,9 @@ func TestResolveIdents(t *testing.T) {
 				case 3:
 					both = append(both, x.Value)
 				}
-				return false
+				return true
 			}
-			return true
+			return false
 		})
 	}
 

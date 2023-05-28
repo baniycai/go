@@ -9,17 +9,17 @@ package modcmd
 import (
 	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
-	"cmd/go/internal/gover"
 	"cmd/go/internal/imports"
 	"cmd/go/internal/modload"
 	"context"
 	"fmt"
 
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/semver"
 )
 
 var cmdTidy = &base.Command{
-	UsageLine: "go mod tidy [-e] [-v] [-x] [-go=version] [-compat=version]",
+	UsageLine: "go mod tidy [-e] [-v] [-go=version] [-compat=version]",
 	Short:     "add missing and remove unused modules",
 	Long: `
 Tidy makes sure go.mod matches the source code in the module.
@@ -48,8 +48,6 @@ version. By default, tidy acts as if the -compat flag were set to the
 version prior to the one indicated by the 'go' directive in the go.mod
 file.
 
-The -x flag causes tidy to print the commands download executes.
-
 See https://golang.org/ref/mod#go-mod-tidy for more about 'go mod tidy'.
 	`,
 	Run: runTidy,
@@ -63,11 +61,9 @@ var (
 
 func init() {
 	cmdTidy.Flag.BoolVar(&cfg.BuildV, "v", false, "")
-	cmdTidy.Flag.BoolVar(&cfg.BuildX, "x", false, "")
 	cmdTidy.Flag.BoolVar(&tidyE, "e", false, "")
 	cmdTidy.Flag.Var(&tidyGo, "go", "")
 	cmdTidy.Flag.Var(&tidyCompat, "compat", "")
-	base.AddChdirFlag(&cmdTidy.Flag)
 	base.AddModCommonFlags(&cmdTidy.Flag)
 }
 
@@ -84,11 +80,11 @@ func (f *goVersionFlag) Get() any       { return f.v }
 
 func (f *goVersionFlag) Set(s string) error {
 	if s != "" {
-		latest := gover.Local()
+		latest := modload.LatestGoVersion()
 		if !modfile.GoVersionRE.MatchString(s) {
 			return fmt.Errorf("expecting a Go version like %q", latest)
 		}
-		if gover.Compare(s, latest) > 0 {
+		if semver.Compare("v"+s, "v"+latest) > 0 {
 			return fmt.Errorf("maximum supported Go version is %s", latest)
 		}
 	}
@@ -117,7 +113,6 @@ func runTidy(ctx context.Context, cmd *base.Command, args []string) {
 
 	modload.LoadPackages(ctx, modload.PackageOpts{
 		GoVersion:                tidyGo.String(),
-		TidyGo:                   tidyGo.String() != "",
 		Tags:                     imports.AnyTags(),
 		Tidy:                     true,
 		TidyCompatibleVersion:    tidyCompat.String(),

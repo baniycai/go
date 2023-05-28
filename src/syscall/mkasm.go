@@ -4,6 +4,23 @@
 
 //go:build ignore
 
+// 具体来说，mkasm.go 是一个用于生成汇编语言 trampolines（跳板）的程序。这些 trampolines 可以用来从 Go 代码中调用库函数。
+//因为 Go 和 C/C++ 之间有一定的差异，所以必须使用这些 trampolines 来协调不同的函数调用约定，并确保正确的参数传递和返回值处理。
+//
+//需要注意的是，mkasm.go 程序必须在 mksyscall.pl 程序之后运行。mksyscall.pl 是另一个用于生成系统调用包装器的程序，它会生成一些 C 代码文件，用于将 Go 对象转换为可以传递给底层系统调用的原始数据类型。
+//因此，在运行 mkasm.go 之前，我们必须先运行 mksyscall.pl，以便生成必要的 C 代码文件。
+//
+
+// 汇编语言 trampolines（跳板）是一种用于跨越不同函数调用约定的技术。在计算机领域中，不同的编程语言和操作系统可能会使用不同的函数调用约定，即规定不同的方式来传递参数、返回值和调用堆栈等信息。
+//
+//当我们从 Go 代码中调用一个库函数（例如 C 函数）时，由于 Go 和 C 使用了不同的函数调用约定，我们需要在两者之间进行协调，以确保正确的参数传递和返回值处理。这就是 trampolines 发挥作用的地方。
+//
+//具体来说，trampolines 是一些小型的汇编语言程序，它们可以包装一个库函数，并将其转换为一个符合特定约定的可调用函数。
+//当我们从 Go 代码中调用这个可调用函数时，trampolines 将负责在底层代码中执行正确的步骤，以便将参数和返回值从 Go 程序转换为 C 函数可以理解的格式。类似地，在 C 函数返回时，trampolines 会负责将返回值转换回 Go 可以理解的格式，并将控制权返回给 Go 代码。
+//
+//因此，trampolines 可以看作是一种桥梁，它允许我们在不同的函数调用约定之间进行协调，以便实现不同编程语言和系统之间的互操作性。
+//在 Go 中，我们经常使用 trampolines 来调用 C 函数、系统调用或者汇编语言函数等，以便与底层操作系统和硬件进行交互。
+
 // mkasm.go generates assembly trampolines to call library routines from Go.
 // This program must be run after mksyscall.pl.
 package main

@@ -14,7 +14,6 @@ import (
 	"runtime"
 
 	"cmd/go/internal/base"
-	"cmd/go/internal/gover"
 	"cmd/go/internal/modfetch"
 	"cmd/go/internal/modload"
 
@@ -39,7 +38,6 @@ See https://golang.org/ref/mod#go-mod-verify for more about 'go mod verify'.
 }
 
 func init() {
-	base.AddChdirFlag(&cmdVerify.Flag)
 	base.AddModCommonFlags(&cmdVerify.Flag)
 }
 
@@ -59,7 +57,7 @@ func runVerify(ctx context.Context, cmd *base.Command, args []string) {
 
 	// Use a slice of result channels, so that the output is deterministic.
 	const defaultGoVersion = ""
-	mods := modload.LoadModGraph(ctx, defaultGoVersion).BuildList()[modload.MainModules.Len():]
+	mods := modload.LoadModGraph(ctx, defaultGoVersion).BuildList()[1:]
 	errsChans := make([]<-chan []error, len(mods))
 
 	for i, mod := range mods {
@@ -68,7 +66,7 @@ func runVerify(ctx context.Context, cmd *base.Command, args []string) {
 		errsChans[i] = errsc
 		mod := mod // use a copy to avoid data races
 		go func() {
-			errsc <- verifyMod(ctx, mod)
+			errsc <- verifyMod(mod)
 			<-sem
 		}()
 	}
@@ -86,17 +84,13 @@ func runVerify(ctx context.Context, cmd *base.Command, args []string) {
 	}
 }
 
-func verifyMod(ctx context.Context, mod module.Version) []error {
-	if gover.IsToolchain(mod.Path) {
-		// "go" and "toolchain" have no disk footprint; nothing to verify.
-		return nil
-	}
+func verifyMod(mod module.Version) []error {
 	var errs []error
-	zip, zipErr := modfetch.CachePath(ctx, mod, "zip")
+	zip, zipErr := modfetch.CachePath(mod, "zip")
 	if zipErr == nil {
 		_, zipErr = os.Stat(zip)
 	}
-	dir, dirErr := modfetch.DownloadDir(ctx, mod)
+	dir, dirErr := modfetch.DownloadDir(mod)
 	data, err := os.ReadFile(zip + "hash")
 	if err != nil {
 		if zipErr != nil && errors.Is(zipErr, fs.ErrNotExist) &&

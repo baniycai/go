@@ -21,7 +21,6 @@ func (p Pair[_, X2]) Second() X2 {
 	return p.f2
 }
 
-// Deprecated: Use something else.
 func Clone[S ~[]T, T any](s S) S {
 	return append(S(nil), s...)
 }

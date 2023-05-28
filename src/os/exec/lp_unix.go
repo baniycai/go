@@ -8,12 +8,11 @@ package exec
 
 import (
 	"errors"
-	"internal/syscall/unix"
+	"internal/godebug"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 )
 
 // ErrNotFound is the error resulting if a path search failed to find an executable file.
@@ -24,18 +23,7 @@ func findExecutable(file string) error {
 	if err != nil {
 		return err
 	}
-	m := d.Mode()
-	if m.IsDir() {
-		return syscall.EISDIR
-	}
-	err = unix.Eaccess(file, unix.X_OK)
-	// ENOSYS means Eaccess is not available or not implemented.
-	// EPERM can be returned by Linux containers employing seccomp.
-	// In both cases, fall back to checking the permission bits.
-	if err == nil || (err != syscall.ENOSYS && err != syscall.EPERM) {
-		return err
-	}
-	if m&0111 != 0 {
+	if m := d.Mode(); !m.IsDir() && m&0111 != 0 {
 		return nil
 	}
 	return fs.ErrPermission
@@ -69,11 +57,8 @@ func LookPath(file string) (string, error) {
 		}
 		path := filepath.Join(dir, file)
 		if err := findExecutable(path); err == nil {
-			if !filepath.IsAbs(path) {
-				if execerrdot.Value() != "0" {
-					return path, &Error{file, ErrDot}
-				}
-				execerrdot.IncNonDefault()
+			if !filepath.IsAbs(path) && godebug.Get("execerrdot") != "0" {
+				return path, &Error{file, ErrDot}
 			}
 			return path, nil
 		}
