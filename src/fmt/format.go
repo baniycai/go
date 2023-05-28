@@ -5,8 +5,8 @@
 package fmt
 
 import (
-	"strconv"
-	"unicode/utf8"
+	"std/strconv"
+	"std/unicode/utf8"
 )
 
 const (
@@ -22,7 +22,7 @@ const (
 // flags placed in a separate struct for easy clearing.
 type fmtFlags struct {
 	widPresent  bool // 是否限制占位符被替换后的位置的长度(todo)
-	precPresent bool
+	precPresent bool // 是否进行精度处理
 	minus       bool // '-'
 	plus        bool // '+'
 	sharp       bool // '#'
@@ -44,7 +44,7 @@ type fmt struct {
 	fmtFlags
 
 	wid  int // width   限制的占位符被替换后的位置的长度
-	prec int // precision
+	prec int // precision	精度处理，保留string后几位
 
 	// intbuf is large enough to store %b of an int64 with a sign and
 	// avoids padding at the end of the struct on 32 bit architectures.
@@ -104,6 +104,7 @@ func (f *fmt) pad(b []byte) {
 	}
 }
 
+// 判断是否需要进行填充，使得占位符被替换后的位置满足一定的长度要求；最后写入buf
 // padString appends s to f.buf, padded on left (!f.minus) or right (f.minus).
 func (f *fmt) padString(s string) {
 	if !f.widPresent || f.wid == 0 {
@@ -321,6 +322,7 @@ func (f *fmt) fmtInteger(u uint64, base int, isSigned bool, verb rune, digits st
 	f.zero = oldZero
 }
 
+// 精度处理
 // truncateString truncates the string s to the specified precision, if present.
 func (f *fmt) truncateString(s string) string {
 	if f.precPresent {

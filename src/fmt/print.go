@@ -111,7 +111,7 @@ type pp struct {
 	// value is used instead of arg for reflect values.
 	value reflect.Value
 
-	// fmt is used to format basic items such as integers or strings.
+	// fmt is used to format basic items such as integers or strings.NOTE 比较关键的一个属性
 	fmt fmt
 
 	// reordered records whether the format string used argument reordering.
@@ -143,6 +143,7 @@ func newPrinter() *pp {
 	return p
 }
 
+// 参数置空，并将pp放回pool
 // free saves used pp structs in ppFree; avoids an allocation per invocation.
 func (p *pp) free() {
 	// Proper usage of a sync.Pool requires each entry to have approximately
@@ -203,7 +204,7 @@ func (p *pp) WriteString(s string) (ret int, err error) {
 func Fprintf(w io.Writer, format string, a ...any) (n int, err error) {
 	p := newPrinter()
 	p.doPrintf(format, a)
-	n, err = w.Write(p.buf)
+	n, err = w.Write(p.buf) // NOTE 格式化后写入io
 	p.free()
 	return
 }
@@ -361,21 +362,26 @@ func (p *pp) unknownType(v reflect.Value) {
 
 func (p *pp) badVerb(verb rune) {
 	p.erroring = true
+	// %!verb(
 	p.buf.writeString(percentBangString)
 	p.buf.writeRune(verb)
 	p.buf.writeByte('(')
 	switch {
 	case p.arg != nil:
+		// ArgType=***
 		p.buf.writeString(reflect.TypeOf(p.arg).String())
 		p.buf.writeByte('=')
 		p.printArg(p.arg, 'v')
 	case p.value.IsValid():
+		// valueType=
 		p.buf.writeString(p.value.Type().String())
 		p.buf.writeByte('=')
 		p.printValue(p.value, 'v', 0)
 	default:
+		// <nil>
 		p.buf.writeString(nilAngleString)
 	}
+	// )
 	p.buf.writeByte(')')
 	p.erroring = false
 }
@@ -663,6 +669,7 @@ func (p *pp) handleMethods(verb rune) (handled bool) {
 	return false
 }
 
+// 先按verb(特殊verb:'T','v')来处理(比如'T'，我们对arg一个反射，然后将值写入buf即可)，再按arg.type来进行处理，处理逻辑的最终都是将arg写入buf，当然，不是直接写，会考虑填充啥的
 // verb是占位符，arg是具体值
 func (p *pp) printArg(arg any, verb rune) {
 	p.arg = arg
@@ -671,7 +678,7 @@ func (p *pp) printArg(arg any, verb rune) {
 	if arg == nil { // 没有对应的替换值
 		switch verb {
 		case 'T', 'v':
-			p.fmt.padString(nilAngleString) // 补空，达到指定的长度
+			p.fmt.padString(nilAngleString) // 填充，达到指定的长度
 		default:
 			p.badVerb(verb)
 		}
@@ -692,8 +699,9 @@ func (p *pp) printArg(arg any, verb rune) {
 	// Some types can be done without reflection.
 	switch f := arg.(type) {
 	case bool:
-		p.fmtBool(f, verb)
+		p.fmtBool(f, verb) // bool只支持t和v，这里主要是写入buf
 	case float32:
+		// todo 下面这些都未看
 		p.fmtFloat(float64(f), 32, verb)
 	case float64:
 		p.fmtFloat(f, 64, verb)
@@ -1004,6 +1012,7 @@ func (p *pp) missingArg(verb rune) {
 	p.buf.writeString(missingString)
 }
 
+// 主要是遍历format，遇到常规字符就直接写入buf，遇到占位符就取a的对应值，并根据占位符的内容进行各种处理，最终也是写入buf
 func (p *pp) doPrintf(format string, a []any) {
 	end := len(format)
 	argNum := 0         // we process one argument per non-trivial format
@@ -1019,7 +1028,7 @@ formatLoop:
 		if i > lasti {
 			p.buf.writeString(format[lasti:i]) // 先把前面的常规字符写到buffer
 		}
-		if i >= end {
+		if i >= end { // 没有占位符
 			// done processing format string
 			break
 		}
@@ -1029,7 +1038,7 @@ formatLoop:
 
 		// Do we have flags?
 		p.fmt.clearflags()
-	simpleFormat:
+	simpleFormat: // %后可能带多个符号
 		for ; i < end; i++ {
 			c := format[i]
 			switch c {
@@ -1063,7 +1072,6 @@ formatLoop:
 						p.fmt.plusV = p.fmt.plus
 						p.fmt.plus = false
 					}
-					// todo 这里
 					p.printArg(a[argNum], rune(c))
 					argNum++
 					i++
