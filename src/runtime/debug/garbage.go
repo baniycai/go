@@ -91,6 +91,9 @@ func ReadGCStats(stats *GCStats) {
 // limit.
 // A negative percentage effectively disables garbage collection, unless
 // the memory limit is reached.
+// SetGCPercent 设置垃圾收集目标百分比：当新分配的数据与上次收集后剩余的活动数据的比率达到此百分比时，将触发收集。
+// SetGCPercent 返回以前的设置。初始设置为启动时 GOGC 环境变量的值，如果未设置变量则为 100。
+// 为了保持内存限制，可以有效地减少此设置。负百分比有效地禁用垃圾收集，除非达到内存限制
 // See SetMemoryLimit for more details.
 func SetGCPercent(percent int) int {
 	return int(setGCPercent(int32(percent)))

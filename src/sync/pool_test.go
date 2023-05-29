@@ -9,13 +9,13 @@
 package sync_test
 
 import (
-	"runtime"
-	"runtime/debug"
-	"sort"
-	. "sync"
-	"sync/atomic"
+	"std/runtime"
+	"std/runtime/debug"
+	"std/sort"
+	. "std/sync"
+	"std/sync/atomic"
+	"std/time"
 	"testing"
-	"time"
 )
 
 func TestPool(t *testing.T) {
@@ -47,6 +47,14 @@ func TestPool(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		p.Put("c")
 	}
+	// GC是一种自动内存管理机制，用于回收不再使用的内存。在Go语言中，GC由运行时(runtime)实现，它会周期性地遍历堆上的所有对象，标记那些被引用的对象并清除那些没有被引用的对象。
+	//GC会将被清除对象占用的内存重用或返回给操作系统。
+	//Victim cache是一个缓存机制，它用于优化GC的性能。
+	//当GC发现某个对象可以被回收时，它不会立即将对象的内存返回给操作系统，而是将对象添加到victim cache中。
+	//这样，如果同样大小的对象再次分配内存，就可以直接从victim cache中获取，而不需要向操作系统请求新的内存。
+	//这段注释的意思是，在进行一次GC后，victim cache应该仍然保留对那些还活着的对象的引用。
+	//这是因为，如果一个对象已经经历了一次GC并且仍然存活，那么它很有可能在下一次GC中也是存活的。
+	//将这些对象保留在victim cache中可以加快下一次GC的速度，因为GC不需要扫描这些对象。
 	// After one GC, the victim cache should keep them alive.
 	runtime.GC()
 	if g := p.Get(); g != "c" {
