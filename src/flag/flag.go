@@ -401,6 +401,7 @@ type Flag struct {
 	DefValue string // default value (as text); for usage message
 }
 
+// 将flag按name的字典序排序
 // sortFlags returns the flags as a slice in lexicographical sorted order.
 func sortFlags(flags map[string]*Flag) []*Flag {
 	result := make([]*Flag, len(flags))
@@ -528,11 +529,12 @@ func isZeroValue(flag *Flag, value string) (ok bool, err error) {
 	return value == z.Interface().(Value).String(), nil
 }
 
-// UnquoteUsage extracts a back-quoted name from the usage
+// UnquoteUsage extracts a back-quoted(反引号) name from the usage
 // string for a flag and returns it and the un-quoted usage.
 // Given "a `name` to show" it returns ("name", "a name to show").
 // If there are no back quotes, the name is an educated guess of the
 // type of the flag's value, or the empty string if the flag is boolean.
+// 从usage中抽取出name，比如"a `name` to show"，结果返回("name", "a name to show")。如果抽取不到name则按照value的类型来为name取名
 func UnquoteUsage(flag *Flag) (name string, usage string) {
 	// Look for a back-quoted name, but avoid the strings package.
 	usage = flag.Usage
@@ -570,26 +572,27 @@ func UnquoteUsage(flag *Flag) (name string, usage string) {
 // PrintDefaults prints, to standard error unless configured otherwise, the
 // default values of all defined command-line flags in the set. See the
 // documentation for the global function PrintDefaults for more information.
+// 打印出所有flag的默认值
 func (f *FlagSet) PrintDefaults() {
 	var isZeroValueErrs []error
-	f.VisitAll(func(flag *Flag) {
+	f.VisitAll(func(flag *Flag) { // 对所有flag按照name进行字典序排序后执行func
 		var b strings.Builder
-		fmt.Fprintf(&b, "  -%s", flag.Name) // Two spaces before -; see next two comments.
-		name, usage := UnquoteUsage(flag)
+		fmt.Fprintf(&b, "  -%s", flag.Name) // Two spaces before -; see next two comments.     -flagName
+		name, usage := UnquoteUsage(flag)   // 上面的flagName应该是缩写，这个是完整名称
 		if len(name) > 0 {
 			b.WriteString(" ")
 			b.WriteString(name)
 		}
 		// Boolean flags of one ASCII letter are so common we
 		// treat them specially, putting their usage on the same line.
-		if b.Len() <= 4 { // space, space, '-', 'x'.
+		if b.Len() <= 4 { // space, space, '-', 'x'.	对于Boolean flags特殊处理，flagName跟usage同一行
 			b.WriteString("\t")
 		} else {
 			// Four spaces before the tab triggers good alignment
 			// for both 4- and 8-space tab stops.
 			b.WriteString("\n    \t")
 		}
-		b.WriteString(strings.ReplaceAll(usage, "\n", "\n    \t"))
+		b.WriteString(strings.ReplaceAll(usage, "\n", "\n    \t")) // usage每一行的开头都空一个tab
 
 		// Print the default value only if it differs to the zero value
 		// for this flag type.
@@ -597,13 +600,18 @@ func (f *FlagSet) PrintDefaults() {
 			isZeroValueErrs = append(isZeroValueErrs, err)
 		} else if !isZero {
 			if _, ok := flag.Value.(*stringValue); ok {
-				// put quotes on the value
+				// put quotes on the value			打印default值
 				fmt.Fprintf(&b, " (default %q)", flag.DefValue)
 			} else {
 				fmt.Fprintf(&b, " (default %v)", flag.DefValue)
 			}
 		}
 		fmt.Fprint(f.Output(), b.String(), "\n")
+		// 大概格式
+		//  -n name
+		//  balabalabalabala
+		//  balabalabalabala
+		//  (default defautlVal)
 	})
 	// If calling String on any zero flag.Values triggered a panic, print
 	// the messages after the full set of defaults so that the programmer
@@ -649,7 +657,7 @@ func PrintDefaults() {
 // defaultUsage is the default function to print a usage message.
 func (f *FlagSet) defaultUsage() {
 	if f.name == "" {
-		fmt.Fprintf(f.Output(), "Usage:\n")
+		fmt.Fprintf(f.Output(), "Usage:\n") // Usage:
 	} else {
 		fmt.Fprintf(f.Output(), "Usage of %s:\n", f.name)
 	}

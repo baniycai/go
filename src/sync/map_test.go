@@ -8,10 +8,10 @@ import (
 	"math/rand"
 	"reflect"
 	"runtime"
+	"std/testing"
+	"std/testing/quick"
 	"sync"
 	"sync/atomic"
-	"testing"
-	"testing/quick"
 )
 
 type mapOp string

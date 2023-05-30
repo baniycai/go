@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 )
 
+// Once NOTE 注意，只能执行一次，所以Once用完就无效了，只能再新建一个
 // Once is an object that will perform exactly one action.
 //
 // A Once must not be copied after first use.
@@ -21,7 +22,7 @@ type Once struct {
 	// The hot path is inlined at every call site.
 	// Placing done first allows more compact instructions on some architectures (amd64/386),
 	// and fewer instructions (to calculate offset) on other architectures.
-	done uint32
+	done uint32 // 记录func是否已被执行，done=1就是已执行
 	m    Mutex
 }
 

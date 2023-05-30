@@ -5,7 +5,7 @@
 package sync_test
 
 import (
-	. "sync"
+	. "std/sync"
 	"testing"
 )
 

@@ -11,7 +11,7 @@
 package sync
 
 import (
-	"internal/race"
+	"std/internal/race"
 	"sync/atomic"
 	"unsafe"
 )
