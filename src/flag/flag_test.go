@@ -6,13 +6,13 @@ package flag_test
 
 import (
 	"bytes"
-	. "flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"runtime"
 	"sort"
+	. "std/flag"
 	"std/internal/testenv"
 	"strconv"
 	"strings"
@@ -145,6 +145,7 @@ func TestGet(t *testing.T) {
 	VisitAll(visitor)
 }
 
+// todo 未看
 func TestUsage(t *testing.T) {
 	called := false
 	ResetForTesting(func() { called = true })
@@ -156,6 +157,7 @@ func TestUsage(t *testing.T) {
 	}
 }
 
+// NOTE 这个感觉就是实战用法了，不过这里的args通常是从命令行获取的
 func testParse(f *FlagSet, t *testing.T) {
 	if f.Parsed() {
 		t.Error("f.Parse() = true before Parse")

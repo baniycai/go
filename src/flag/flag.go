@@ -385,10 +385,10 @@ type FlagSet struct {
 	Usage func()
 
 	name          string
-	parsed        bool
-	actual        map[string]*Flag
-	formal        map[string]*Flag
-	args          []string // arguments after flags
+	parsed        bool             // 记录有无调用过Parse()方法
+	actual        map[string]*Flag // 放的是我们注册的flag和其真实值，放入的前提是先放入formal，也就是先注册叭(?)
+	formal        map[string]*Flag // 放的是我们注册的flag，但是没有真实值，
+	args          []string         // arguments after flags
 	errorHandling ErrorHandling
 	output        io.Writer // nil means stderr; use Output() accessor
 }
@@ -397,7 +397,7 @@ type FlagSet struct {
 type Flag struct {
 	Name     string // name as it appears on command line
 	Usage    string // help message
-	Value    Value  // value as set
+	Value    Value  // value as set  将各种常规的数据类型(bool、int...)又定义了一遍(type),然后实现了Value定义的两个接口，string用来将该类型转为string，set用来设置值
 	DefValue string // default value (as text); for usage message
 }
 
@@ -481,6 +481,7 @@ func Lookup(name string) *Flag {
 }
 
 // Set sets the value of the named flag.
+// NOTE set放入的是actual，且放入actual的前提是已经调用Bool、Int、Int64这些方法将其放入formal
 func (f *FlagSet) Set(name, value string) error {
 	flag, ok := f.formal[name]
 	if !ok {
@@ -739,6 +740,12 @@ func (f *FlagSet) Bool(name string, value bool, usage string) *bool {
 
 // Bool defines a bool flag with specified name, default value, and usage string.
 // The return value is the address of a bool variable that stores the value of the flag.
+// NOTE Bool、Int、Int64...这一坨方法的逻辑都是一样的，新建一个bool/int/int64...类型的指针，将指针指向的值设为value
+// 即调用对应的new***Value(),最终得到一个xxxValue类型的值，其实这个xxxValue类型就是常规的int或bool等等这些类型，不过是重新定义了一下
+// 添加了set和string两个方法(Value接口)，做了一下增强，set用来设置xxxValue类型的具体值，string用来将其转化为string
+// 最后一步是调用f.Var方法，将这一坨参数封装成一个flag，放到FlagSet的normal这个map中
+// NOTE 注意，这里返回的指针噢,所以外界可以拿去修改，或者说我们通过Parse()传入flag的真实值时，这里返回的指针在外界被访问的值也变成我们通过Parse()传入的真实值噢，详情看flag_test.go的testParse()方法
+// NOTE 注意，这里传入的value就是默认值
 func Bool(name string, value bool, usage string) *bool {
 	return CommandLine.Bool(name, value, usage)
 }
@@ -969,6 +976,7 @@ func Func(name, usage string, fn func(string) error) {
 // decompose the comma-separated string into the slice.
 func (f *FlagSet) Var(value Value, name string, usage string) {
 	// Flag must not begin "-" or contain "=".
+	// 不允许以-或=开头
 	if strings.HasPrefix(name, "-") {
 		panic(f.sprintf("flag %q begins with -", name))
 	} else if strings.Contains(name, "=") {
@@ -976,6 +984,7 @@ func (f *FlagSet) Var(value Value, name string, usage string) {
 	}
 
 	// Remember the default value as a string; it won't change.
+	// NOTE 包装成Flag，放到formal这个map中
 	flag := &Flag{name, usage, value, value.String()}
 	_, alreadythere := f.formal[name]
 	if alreadythere {
@@ -1029,23 +1038,37 @@ func (f *FlagSet) usage() {
 }
 
 // parseOne parses one flag. It reports whether a flag was seen.
+// 下面是常见格式，其中bool特殊处理，可以没有value
+//
+//	"-bool",
+//	"-bool2=true",
+//	"--int", "22",
+//	"--int64", "0x23",
+//	"-uint", "24",
+//	"--uint64", "25",
+//	"-string", "hello",
+//	"-float64", "2718e28",
+//	"-duration", "2m",
+//
+// NOTE 在调用该方法前，我们通常会先声明一些flag，以及它们对应usage，还有value(这个应该是没用的，只是示例)，最终是包装成flag放到flagSet的formal中
+// parseOne会传入flag以及对应的真实值，基本格式如上面所示，下面是解析逻辑，最终放到actual中
 func (f *FlagSet) parseOne() (bool, error) {
 	if len(f.args) == 0 {
 		return false, nil
 	}
 	s := f.args[0]
-	if len(s) < 2 || s[0] != '-' {
+	if len(s) < 2 || s[0] != '-' { // 必须以-开头，且长度最小为2
 		return false, nil
 	}
 	numMinuses := 1
-	if s[1] == '-' {
+	if s[1] == '-' { // --flag 格式
 		numMinuses++
 		if len(s) == 2 { // "--" terminates the flags
 			f.args = f.args[1:]
 			return false, nil
 		}
 	}
-	name := s[numMinuses:]
+	name := s[numMinuses:] // 将前面的-或--抛弃掉，得到 flag=val 的格式
 	if len(name) == 0 || name[0] == '-' || name[0] == '=' {
 		return false, f.failf("bad flag syntax: %s", s)
 	}
@@ -1055,7 +1078,7 @@ func (f *FlagSet) parseOne() (bool, error) {
 	hasValue := false
 	value := ""
 	for i := 1; i < len(name); i++ { // equals cannot be first
-		if name[i] == '=' {
+		if name[i] == '=' { // 以=为分界，前面的是flag name，后面的是val
 			value = name[i+1:]
 			hasValue = true
 			name = name[0:i]
@@ -1064,7 +1087,7 @@ func (f *FlagSet) parseOne() (bool, error) {
 	}
 	m := f.formal
 	flag, alreadythere := m[name] // BUG
-	if !alreadythere {
+	if !alreadythere {            // 若是h或help，则进行友好提示，提示用法
 		if name == "help" || name == "h" { // special case for nice help message.
 			f.usage()
 			return false, ErrHelp
@@ -1072,6 +1095,7 @@ func (f *FlagSet) parseOne() (bool, error) {
 		return false, f.failf("flag provided but not defined: -%s", name)
 	}
 
+	// bool特殊处理，可以没有val
 	if fv, ok := flag.Value.(boolFlag); ok && fv.IsBoolFlag() { // special case: doesn't need an arg
 		if hasValue {
 			if err := fv.Set(value); err != nil {
@@ -1082,9 +1106,9 @@ func (f *FlagSet) parseOne() (bool, error) {
 				return false, f.failf("invalid boolean flag %s: %v", name, err)
 			}
 		}
-	} else {
+	} else { // 其它类型必须有val
 		// It must have a value, which might be the next argument.
-		if !hasValue && len(f.args) > 0 {
+		if !hasValue && len(f.args) > 0 { // 没有=号的，取下一个arg作为value
 			// value is the next arg
 			hasValue = true
 			value, f.args = f.args[0], f.args[1:]
@@ -1099,7 +1123,7 @@ func (f *FlagSet) parseOne() (bool, error) {
 	if f.actual == nil {
 		f.actual = make(map[string]*Flag)
 	}
-	f.actual[name] = flag
+	f.actual[name] = flag // NOTE 最终放到actual中
 	return true, nil
 }
 
@@ -1107,6 +1131,7 @@ func (f *FlagSet) parseOne() (bool, error) {
 // include the command name. Must be called after all flags in the FlagSet
 // are defined and before flags are accessed by the program.
 // The return value will be ErrHelp if -help or -h were set but not defined.
+// 解析真实的flag值到actual中,前提是该flag已注册
 func (f *FlagSet) Parse(arguments []string) error {
 	f.parsed = true
 	f.args = arguments
@@ -1153,6 +1178,7 @@ func Parsed() bool {
 // CommandLine is the default set of command-line flags, parsed from os.Args.
 // The top-level functions such as BoolVar, Arg, and so on are wrappers for the
 // methods of CommandLine.
+// 这个应该是比较常用的全局变量，FlagSet，即一个存放所有flag集的结构，名字为os.Args[0]
 var CommandLine = NewFlagSet(os.Args[0], ExitOnError)
 
 func init() {
