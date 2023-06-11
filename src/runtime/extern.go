@@ -204,8 +204,8 @@ of the run-time system.
 package runtime
 
 import (
-	"internal/goarch"
-	"internal/goos"
+	"std/internal/goarch"
+	"std/internal/goos"
 )
 
 // Caller reports file and line number information about function invocations on
@@ -237,6 +237,43 @@ func Caller(skip int) (pc uintptr, file string, line int, ok bool) {
 // directly is discouraged, as is using FuncForPC on any of the
 // returned PCs, since these cannot account for inlining or return
 // program counter adjustment.
+
+// runtime.Callers() 是一个Go语言标准库中的函数，它可以用来获取当前 Goroutine 的调用栈信息。
+//通过这个函数，你可以获得当前 Goroutine 所在的函数以及它的调用链路。
+//
+//该方法有两个参数，第一个参数 skip 表示在调用栈上要跳过的帧数，0 表示返回调用者的调用栈帧，1 表示返回调用者的调用者的调用栈帧，以此类推。
+//第二个参数 pc 是一个 uintptr 类型的指针数组，用于存储调用栈中的程序计数器（program counter）指针，
+//runtime.Callers() 函数会填充该数组，并返回写入的数量。
+//
+//例如以下代码可以输出当前 Goroutine 的调用栈信息：
+//
+//func printCallStack() {
+//    pcs := make([]uintptr, 10) // at least 1 entry needed
+//    n := runtime.Callers(2, pcs)
+//    frames := runtime.CallersFrames(pcs[:n])
+//    for {
+//        frame, more := frames.Next()
+//        fmt.Printf("- %s:%d\n", frame.File, frame.Line)
+//        if !more {
+//            break
+//        }
+//     }
+//}
+//在上面的例子中，我们先创建了一个长度为10的 uintptr 数组用于保存调用栈信息，
+//然后调用 runtime.Callers(2, pcs) 方法来获取调用栈信息并填充到数组中（注意这里的参数 skip 值为 2， 是因为调用栈上前两个帧是 runtime.Callers 方法本身和调用 printCallStack 方法的函数，不需要在结果中显示）。
+//最后，我们使用 runtime.CallersFrames() 方法将程序计数器指针转化为调用栈帧（call frame）结构体，并对每一个调用栈帧进行输出。
+// runtime.Callers 是 Go 语言标准库中提供的一个函数，用于获取当前 goroutine 的调用栈信息。
+//该函数可以获取当前 goroutine 中调用指定深度（depth）的所有函数的名称、文件名和行号等信息。
+//
+//具体来说，runtime.Callers 函数接收两个参数：第一个参数 depth 表示要获取调用栈信息的深度；
+//第二个参数 pc 数组表示要存储 PC（Program Counter）值的切片。
+//runtime.Callers 函数会将当前 goroutine 的调用栈信息填充到 pc 数组中，并返回实际填充的元素数量。
+//我们可以通过这些 PC 值使用 runtime.FuncForPC 函数获取对应的函数名称、文件名和行号等信息。
+//
+//在实际开发中，runtime.Callers 可以用于编写一些调试或性能分析工具，例如可以用它来实现一个简单的堆栈跟踪函数，或者用于统计程序中某些函数的调用频率等。
+//需要注意的是，由于 runtime.Callers 只能获取当前 goroutine 的调用栈信息，因此在多线程程序中如果需要获取其他线程的调用栈信息，则需要在目标线程中执行 runtime.Callers 函数。
+// 通常是Callers、CallersFrames和Next三大件一起使用，Callers用来获取堆栈的pc slice，CallersFrames用来获取pc slice的具体信息，Next用来遍历具体信息，得到函数方法，行数等等信息
+
 func Callers(skip int, pc []uintptr) int {
 	// runtime.callers uses pc.array==nil as a signal
 	// to print a stack trace. Pick off 0-length pc here

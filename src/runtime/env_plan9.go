@@ -2,6 +2,18 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// 在Go语言中，plan9相关的文件主要是为了支持分布式操作系统Plan 9的一些特性。
+//
+//Plan 9是由贝尔实验室开发的分布式操作系统，其旨在提供一种基于网络的计算环境，使得用户可以远程协作、共享资源并进行分布式处理。Go语言最初也是由贝尔实验室开发的，因此在设计时就考虑了对Plan 9的支持。
+//
+//在Go语言中，Plan 9相关的文件主要包括：
+//
+//plan9.h：定义了Plan 9的系统调用接口；
+//syscall_plan9.go：实现了Plan 9的系统调用接口；
+//net_plan9.go：实现了Plan 9下的网络套接字接口；
+//os_plan9.go：实现了Plan 9下的文件和进程管理接口。
+//通过这些文件，Go语言可以直接调用Plan 9的系统调用接口和其他相关功能，从而支持分布式计算和网络编程等应用。
+
 package runtime
 
 import "unsafe"

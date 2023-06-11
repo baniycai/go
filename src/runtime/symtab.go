@@ -5,9 +5,9 @@
 package runtime
 
 import (
-	"internal/goarch"
-	"runtime/internal/atomic"
-	"runtime/internal/sys"
+	"std/internal/goarch"
+	"std/runtime/internal/atomic"
+	"std/runtime/internal/sys"
 	"unsafe"
 )
 
