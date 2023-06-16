@@ -8,6 +8,14 @@ The items documented here are not actually in package builtin
 but their descriptions here allow godoc to present documentation
 for the language's special identifiers.
 */
+
+/*
+一大堆内建类型和方法，类型声明都是使用type bool bool或type uint8 uint8的格式，有点奇怪，其中第一个bool是我们代码中用到的(点一下就跳到这个)，第二个bool应该是由编译器实现的，我们不管
+其中需要注意的两个特例是 type byte = uint8和type rune = int32，不过好像也正常，我管你是字符串还是数字，最终底层肯定还是二进制数字，所以用数字来表示好像也没毛病叭
+还有type any = interface{}也蛮离谱的，interface{}是编译器级别的，any的用户级别的，但用起来应该是interface{},我还一直以为两者是完全不同的
+这个也蛮奇怪的，type Type int和var nil Type，原来他娘的原来nil是一个int呀，但有点奇怪的是这里的Type只能是pointer, channel, func, interface, map, or slice type
+还有在这里定义error接口我也是没想到呀
+*/
 package builtin
 
 // bool is the set of boolean values, true and false.
@@ -157,6 +165,12 @@ func append(slice []Type, elems ...Type) []Type
 // string to a slice of bytes.) The source and destination may overlap. Copy
 // returns the number of elements copied, which will be the minimum of
 // len(src) and len(dst).
+
+//	在大多数情况下，直接调用 copy() 函数比循环遍历来复制切片的元素要更高效。这是因为 copy() 函数使用了底层 C 库函数 memmove() 来执行内存拷贝，而这个函数被优化得非常好。
+//
+// 相反，循环遍历需要用到索引、地址计算等额外的操作，可能会导致更多的 CPU 指令和更慢的速度。此外，循环赋值可能会导致缓存未命中，从而增加内存访问时间，影响性能。
+// 但是，在某些特定情况下，循环遍历可能比直接调用 copy() 函数更快。例如，当两个切片的大小都非常小（通常小于 8 个元素）时，由于 copy() 函数还需要进行一些额外的检查，因此循环遍历可能更优秀。
+// 此外，如果需要对源切片进行截取或选择部分元素进行复制，那么也只能通过循环遍历来实现。
 func copy(dst, src []Type) int
 
 // The delete built-in function deletes the element with the specified key

@@ -6,12 +6,12 @@ package reflect
 
 import (
 	"errors"
-	"internal/abi"
-	"internal/goarch"
-	"internal/itoa"
-	"internal/unsafeheader"
 	"math"
 	"runtime"
+	"std/internal/abi"
+	"std/internal/goarch"
+	"std/internal/itoa"
+	"std/internal/unsafeheader"
 	"unsafe"
 )
 

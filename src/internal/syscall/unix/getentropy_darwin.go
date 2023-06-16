@@ -7,7 +7,7 @@
 package unix
 
 import (
-	"internal/abi"
+	"std/internal/abi"
 	"syscall"
 	"unsafe"
 )

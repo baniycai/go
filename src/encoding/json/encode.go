@@ -16,8 +16,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math"
-	"reflect"
 	"sort"
+	"std/reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -106,7 +106,7 @@ import (
 // The key name will be used if it's a non-empty string consisting of
 // only Unicode letters, digits, and ASCII punctuation except quotation
 // marks, backslash, and comma.
-//
+// TODO 这里
 // Anonymous struct fields are usually marshaled as if their inner exported fields
 // were fields in the outer struct, subject to the usual Go visibility rules amended
 // as described in the next paragraph.
@@ -155,7 +155,7 @@ import (
 // handle them. Passing cyclic structures to Marshal will result in
 // an error.
 func Marshal(v any) ([]byte, error) {
-	e := newEncodeState()
+	e := newEncodeState() // 从Pool取，marshal后的结果就放在e中
 
 	err := e.marshal(v, encOpts{escapeHTML: true})
 	if err != nil {
@@ -171,6 +171,8 @@ func Marshal(v any) ([]byte, error) {
 // MarshalIndent is like Marshal but applies Indent to format the output.
 // Each JSON element in the output will begin on a new line beginning with prefix
 // followed by one or more copies of indent according to the indentation nesting.
+
+// 跟Marshal差不多，但每个元素都会新起一行(这个是marshal没有)，并加上prefix前缀，indent用来控制每个元素的缩进，比如"  "或"\t"应该都是可以的
 func MarshalIndent(v any, prefix, indent string) ([]byte, error) {
 	b, err := Marshal(v)
 	if err != nil {
@@ -356,7 +358,7 @@ func isEmptyValue(v reflect.Value) bool {
 }
 
 func (e *encodeState) reflectValue(v reflect.Value, opts encOpts) {
-	valueEncoder(v)(e, v, opts)
+	valueEncoder(v)(e, v, opts) // 获取该反射类型对应的Encoder，再执行encode
 }
 
 type encOpts struct {
@@ -391,6 +393,7 @@ func typeEncoder(t reflect.Type) encoderFunc {
 		f  encoderFunc
 	)
 	wg.Add(1)
+	// NOTE 这操作有点6呀，我靠。直接将一个未初始化的变量f存到cache中，加个wg.Wait()防止被调用。然后再在👇🏻做赋值(f = newTypeEncoder(t, true))和调用wg.Done()
 	fi, loaded := encoderCache.LoadOrStore(t, encoderFunc(func(e *encodeState, v reflect.Value, opts encOpts) {
 		wg.Wait()
 		f(e, v, opts)
@@ -421,9 +424,11 @@ func newTypeEncoder(t reflect.Type, allowAddr bool) encoderFunc {
 	if t.Kind() != reflect.Pointer && allowAddr && reflect.PointerTo(t).Implements(marshalerType) {
 		return newCondAddrEncoder(addrMarshalerEncoder, newTypeEncoder(t, false))
 	}
+	// 实现了Marshaler接口，则marshal控制权利全部交给我们
 	if t.Implements(marshalerType) {
 		return marshalerEncoder
 	}
+	//
 	if t.Kind() != reflect.Pointer && allowAddr && reflect.PointerTo(t).Implements(textMarshalerType) {
 		return newCondAddrEncoder(addrTextMarshalerEncoder, newTypeEncoder(t, false))
 	}
@@ -533,6 +538,7 @@ func addrTextMarshalerEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 	e.stringBytes(b, opts.escapeHTML)
 }
 
+// "true"，下面其它几个方法的实现也基本一样啦，就是类型不一样而已，最终都是生成"xxx"的格式写入encodeState的buf
 func boolEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 	if opts.quoted {
 		e.WriteByte('"')

@@ -110,6 +110,7 @@ type Addr interface {
 // Conn is a generic stream-oriented network connection.
 //
 // Multiple goroutines may invoke methods on a Conn simultaneously.
+// 简单地理解，其底层的IO就是网线或者说网卡吧，读从网卡读，写写到网卡
 type Conn interface {
 	// Read reads data from the connection.
 	// Read can be made to time out and return an error after a fixed

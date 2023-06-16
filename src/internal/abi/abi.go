@@ -5,7 +5,7 @@
 package abi
 
 import (
-	"internal/goarch"
+	"std/internal/goarch"
 	"unsafe"
 )
 

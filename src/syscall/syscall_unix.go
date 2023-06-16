@@ -7,12 +7,12 @@
 package syscall
 
 import (
-	"internal/bytealg"
-	"internal/itoa"
-	"internal/oserror"
-	"internal/race"
-	"internal/unsafeheader"
 	"runtime"
+	"std/internal/bytealg"
+	"std/internal/itoa"
+	"std/internal/oserror"
+	"std/internal/race"
+	"std/internal/unsafeheader"
 	"sync"
 	"unsafe"
 )

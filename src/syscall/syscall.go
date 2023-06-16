@@ -25,7 +25,7 @@
 // information.
 package syscall
 
-import "internal/bytealg"
+import "std/internal/bytealg"
 
 //go:generate go run ./mksyscall_windows.go -systemdll -output zsyscall_windows.go syscall_windows.go security_windows.go
 

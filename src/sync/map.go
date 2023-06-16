@@ -170,7 +170,7 @@ func (m *Map) Store(key, value any) {
 	m.mu.Unlock()
 }
 
-// tryStore stores a value if the entry has not been expunged.
+// tryStore stores a value if the entry has not been expunged（删除）.
 //
 // If the entry is expunged, tryStore returns false and leaves the entry
 // unchanged.

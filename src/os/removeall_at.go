@@ -7,8 +7,8 @@
 package os
 
 import (
-	"internal/syscall/unix"
 	"io"
+	"std/internal/syscall/unix"
 	"syscall"
 )
 

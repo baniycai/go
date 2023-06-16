@@ -74,7 +74,7 @@ type scanner struct {
 	endTop bool
 
 	// Stack of what we're in the middle of - array values, object keys, object values.
-	parseState []int
+	parseState []int // parseState[len(parseState)-1]表示当前正在处理的部分，object keys、object values或array values
 
 	// Error that happened, if any.
 	err error
@@ -84,6 +84,7 @@ type scanner struct {
 	bytes int64
 }
 
+// 大量使用pool，能减少分配就尽量减少分配
 var scannerPool = sync.Pool{
 	New: func() any {
 		return &scanner{}
@@ -175,6 +176,8 @@ func (s *scanner) eof() int {
 
 // pushParseState pushes a new parse state p onto the parse stack.
 // an error state is returned if maxNestingDepth was exceeded, otherwise successState is returned.
+
+// 对于{、[，新增解析状态，但是状态长度不能超过10000，防止栈溢出
 func (s *scanner) pushParseState(c byte, newParseState int, successState int) int {
 	s.parseState = append(s.parseState, newParseState)
 	if len(s.parseState) <= maxNestingDepth {

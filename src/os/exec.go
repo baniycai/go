@@ -6,8 +6,8 @@ package os
 
 import (
 	"errors"
-	"internal/testlog"
 	"runtime"
+	"std/internal/testlog"
 	"sync"
 	"sync/atomic"
 	"syscall"

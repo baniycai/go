@@ -10,8 +10,8 @@ package syscall
 
 import (
 	errorspkg "errors"
-	"internal/bytealg"
 	"runtime"
+	"std/internal/bytealg"
 	"sync"
 	"unsafe"
 )

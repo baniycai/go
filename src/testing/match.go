@@ -63,6 +63,7 @@ func newMatcher(matchString func(pat, str string) (bool, error), patterns, name 
 	}
 }
 
+// 对subname进行一些修整，如重写、去重
 func (m *matcher) fullName(c *common, subname string) (name string, ok, partial bool) {
 	name = subname
 
@@ -193,6 +194,8 @@ func splitRegexp(s string) filterMatch {
 
 // unique creates a unique name for the given parent and subname by affixing it
 // with one or more counts, if necessary.
+
+// 去重，保证parent和subname不一样。具体方法应该是直接重复subname(?)
 func (m *matcher) unique(parent, subname string) string {
 	base := parent + "/" + subname
 
@@ -257,6 +260,8 @@ func parseSubtestNumber(s string) (prefix string, nn int32) {
 
 // rewrite rewrites a subname to having only printable characters and no white
 // space.
+
+// 重写s，保证其所有字符都是可以打印出来的，并且没有空格
 func rewrite(s string) string {
 	b := []byte{}
 	for _, r := range s {

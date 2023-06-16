@@ -5,8 +5,8 @@
 package testing_test
 
 import (
-	"os"
-	"path/filepath"
+	"std/os"
+	"std/path/filepath"
 	"testing"
 )
 
@@ -14,6 +14,14 @@ import (
 // It's here only so that there is at least one package in the
 // standard library with a TestMain, so that code is executed.
 
+// 在 Golang 中，TestMain 函数是测试用例中的一个特殊函数。当我们编写单元测试时，我们可以使用 TestMain 函数来控制测试的行为。
+//
+// 具体来说，TestMain 函数会在执行所有测试函数之前被调用，并且可以在测试开始之前和结束之后做一些初始化和清理工作。
+// 例如，我们可以在 TestMain 函数中建立数据库连接、加载配置文件或者创建测试所需的资源。
+//
+// 另外，TestMain 还可以用于控制测试的退出状态。如果 TestMain 函数调用了 os.Exit 方法并且传递了一个非零的退出状态，那么整个测试套件就会失败。
+//
+// 需要注意的是，如果你在测试文件中定义了 TestMain 函数，那么该文件中的普通测试函数将不会自动运行，需要手动调用 m.Run() 方法来启动测试函数。
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }

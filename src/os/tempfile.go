@@ -6,7 +6,7 @@ package os
 
 import (
 	"errors"
-	"internal/itoa"
+	"std/internal/itoa"
 )
 
 // fastrand provided by runtime.

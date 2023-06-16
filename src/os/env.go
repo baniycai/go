@@ -7,8 +7,8 @@
 package os
 
 import (
-	"internal/testlog"
-	"syscall"
+	"std/internal/testlog"
+	"std/syscall"
 )
 
 // Expand replaces ${var} or $var in the string based on the mapping function.

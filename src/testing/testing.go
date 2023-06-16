@@ -177,6 +177,7 @@
 //	  })
 //	}
 //
+// TODO 看到这里
 // A fuzz test maintains a seed corpus, or a set of inputs which are run by
 // default, and can seed input generation. Seed inputs may be registered by
 // calling (*F).Add or by storing files in the directory testdata/fuzz/<Name>
@@ -337,24 +338,25 @@
 //
 // TestMain is a low-level primitive and should not be necessary for casual
 // testing needs, where ordinary test functions suffice.
+// NOTE 有问题可以先看看上面的注释，写得蛮清晰的了
 package testing
 
 import (
-	"bytes"
-	"errors"
-	"flag"
-	"fmt"
-	"internal/race"
-	"io"
 	"math/rand"
 	"os"
 	"reflect"
-	"runtime"
-	"runtime/debug"
-	"runtime/trace"
+	"std/bytes"
+	"std/errors"
+	"std/flag"
+	"std/fmt"
+	"std/internal/race"
+	"std/io"
+	"std/runtime"
+	"std/runtime/debug"
+	"std/runtime/trace"
+	"std/sync"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unicode"
@@ -368,6 +370,7 @@ var initRan bool
 // when calling functions such as Benchmark without using "go test".
 //
 // Init has no effect if it was already called.
+// NOTE 这里的flags默认是已经注册到go test命令行中的，如果你是通过直接点击测试用例来执行，那就得调用这个方法，不然获取不到这些flags
 func Init() {
 	if initRan {
 		return
@@ -413,6 +416,7 @@ func Init() {
 	initFuzzFlags()
 }
 
+// 跟flag绑定的变量都要用指针，到时候解析命令行得到的值就直接赋值给指针，外界可以直接使用了
 var (
 	// Flags, registered during Init.
 	short                *bool
@@ -511,12 +515,13 @@ type common struct {
 
 	chatty     *chattyPrinter // A copy of chattyPrinter, if the chatty flag is set.
 	bench      bool           // Whether the current test is a benchmark.
-	hasSub     int32          // Written atomically.
+	hasSub     int32          // Written atomically.  是否有子测试，有则值为1
 	raceErrors int            // Number of races detected during test.
 	runner     string         // Function name of tRunner running the test.
 
-	parent   *common
-	level    int       // Nesting depth of test or benchmark.
+	parent *common
+	level  int // Nesting depth of test or benchmark.
+	// 当前堆栈的pc信息
 	creator  []uintptr // If level > 0, the stack trace at the point where the parent called t.Run.
 	name     string    // Name of test or benchmark.
 	start    time.Time // Time test or benchmark started
@@ -789,7 +794,7 @@ type T struct {
 	common
 	isParallel bool
 	isEnvSet   bool
-	context    *testContext // For running tests and subtests.
+	context    *testContext // For running tests and subtests. 所有测试共享的上下文
 }
 
 func (c *common) private() {}
@@ -1333,6 +1338,7 @@ func tRunner(t *T, fn func(t *T)) {
 		t.mu.RLock()
 		finished := t.finished
 		t.mu.RUnlock()
+		// 当前测试失败，递归往上找父测试，如果中间找到一个父测试已经finish，则break
 		if !finished && err == nil {
 			err = errNilPanicOrGoexit
 			for p := t.parent; p != nil; p = p.parent {
@@ -1457,6 +1463,8 @@ func tRunner(t *T, fn func(t *T)) {
 //
 // Run may be called simultaneously from multiple goroutines, but all such calls
 // must return before the outer test function for t returns.
+
+// NOTE 作为t的子测试，在一个独立的协程中运行f函数并阻塞直到f返回，如果你调用了t.Parallel那就不会阻塞
 func (t *T) Run(name string, f func(t *T)) bool {
 	atomic.StoreInt32(&t.hasSub, 1)
 	testName, ok, _ := t.context.match.fullName(&t.common, name)

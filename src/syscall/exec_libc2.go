@@ -7,8 +7,8 @@
 package syscall
 
 import (
-	"internal/abi"
 	"runtime"
+	"std/internal/abi"
 	"unsafe"
 )
 

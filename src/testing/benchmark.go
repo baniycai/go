@@ -5,15 +5,15 @@
 package testing
 
 import (
-	"flag"
 	"fmt"
-	"internal/race"
-	"internal/sysinfo"
 	"io"
 	"math"
 	"os"
 	"runtime"
 	"sort"
+	"std/flag"
+	"std/internal/race"
+	"std/internal/sysinfo"
 	"strconv"
 	"strings"
 	"sync"

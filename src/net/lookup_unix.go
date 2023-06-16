@@ -17,7 +17,23 @@ var onceReadProtocols sync.Once
 
 // readProtocols loads contents of /etc/protocols into protocols map
 // for quick access.
+// NOTE 读取linux系统的/etc/protocols文件,构造一个[protocol]protocolVal映射写入protocols，将[protocolAlias]protocolVal也写入protocols
 func readProtocols() {
+	// 该文件包含的是Internet (IP) protocols，内容示例:
+	// ip	0	IP		# internet protocol, pseudo protocol number
+	//hopopt	0	HOPOPT		# IPv6 Hop-by-Hop Option [RFC1883]
+	//icmp	1	ICMP		# internet control message protocol
+	//igmp	2	IGMP		# Internet Group Management
+	//ggp	3	GGP		# gateway-gateway protocol
+	//ipencap	4	IP-ENCAP	# IP encapsulated in IP (officially ``IP'')
+	//st	5	ST		# ST datagram mode
+	//tcp	6	TCP		# transmission control protocol
+	//egp	8	EGP		# exterior gateway protocol
+	//igp	9	IGP		# any private interior gateway (Cisco)
+	//pup	12	PUP		# PARC universal packet protocol
+	//udp	17	UDP		# user datagram protocol
+	//hmp	20	HMP		# host monitoring protocol
+	//xns-idp	22	XNS-IDP		# Xerox NS IDP
 	file, err := open("/etc/protocols")
 	if err != nil {
 		return
@@ -48,6 +64,7 @@ func readProtocols() {
 
 // lookupProtocol looks up IP protocol name in /etc/protocols and
 // returns correspondent protocol number.
+// NOTE 找出该协议在/etc/protocols文件中的对应protocol number
 func lookupProtocol(_ context.Context, name string) (int, error) {
 	onceReadProtocols.Do(readProtocols)
 	return lookupProtocolMap(name)
