@@ -41,7 +41,15 @@ type Type interface {
 	Size() uintptr
 
 	// Kind returns the specific kind of this type.
-	Kind() Kind
+	Kind() Kind // 返回值类型信息(uint)，下面是例子
+	// Int64
+	//	Uint
+	//	Uint8
+	//	Uint16
+	//	Uint32
+	//	Uint64
+	//	Uintptr
+	//	Float3
 
 	// Implements reports whether the type implements the interface type u.
 	Implements(u Type) bool
@@ -715,7 +723,46 @@ func (t *interfaceType) NumMethod() int { return len(t.methods) }
 
 // TypeOf returns the reflection Type that represents the dynamic type of i.
 // If i is a nil interface value, TypeOf returns nil.
+
 func TypeOf(i any) Type {
+	// 这段代码是将一个任意类型的值 `i` 转换成空接口类型 `interface{}`。在 Go 语言中，空接口表示可以代表任何类型的接口。
+	//
+	//具体来说，该代码使用了 Go 语言标准库中的 `unsafe` 包，通过 `unsafe.Pointer()` 函数将 `i` 的地址强制转换为 `unsafe.Pointer` 类型的指针，然后再将该指针转换为 `*emptyInterface` 类型的指针，最终得到的就是 `interface{}` 类型的值。
+	//
+	//这种方式非常危险，因为它会绕过 Go 语言的类型系统，可能导致内存泄漏或其他未定义行为。因此，除非你非常清楚自己在做什么，否则不要随意使用该方法。
+
+	// note emptyInterface 结构体类型，该类型是 Go 语言标准库中 interface{} 类型内部使用的数据结构。
+	//
+	//该结构体包含两个字段：
+	//
+	//typ：指向一个 rtype 结构体的指针，表示实际存储在该空接口值中的值的具体类型。
+	//word：指向实际存储在该空接口值中的值的指针。因为 interface{} 可以代表任何类型的值，所以该字段的类型为 unsafe.Pointer，可以指向任意类型的值。
+	//通过这种方式，Go 语言在运行时能够动态地判断和转换不同类型的值，同时保证了类型安全性。
+	// note 当我们将一个值赋给一个空接口类型的变量时，Go 语言会自动创建一个 emptyInterface 结构体，并将该值的类型和地址存储在其中，然后将该结构体的地址赋给变量。
+
+	// note `unsafe.Pointer(&i)` 表示将值 `i` 的地址转换为了一个指向 `unsafe.Pointer` 类型的指针。这个操作本质上是将类型系统之外的信息传递给编译器，告诉编译器不要对这个指针进行任何类型检查。
+	//
+	// note 然后，通过将其强制转换为 `*emptyInterface` 类型的指针，我们将该指针重新解释为一个空接口类型的对象的指针，使得我们可以访问该对象中存储的值和类型信息。
+	//
+	// note 这种类型转换方式是非常危险的，因为它会绕过 Go 语言的类型安全机制，可能导致内存泄漏、未定义行为或者其他问题。只有在特定的场景下（比如需要实现类似反射的功能）才应该使用这种技术，否则应该避免使用 `unsafe` 包中的函数和类型。
+
+	// 是的，如果我们在将指针强制转换为 `*emptyInterface` 类型的指针时出现了类型不匹配的情况，就有可能访问到错误的内存地址，导致程序崩溃或者发生其他未定义行为。
+	//
+	// note 比如，如果我们将一个 `int` 类型的变量的地址转换为 `*emptyInterface` 类型的指针，然后尝试通过该指针访问空接口对象中存储的值，那么就会出现错误。因为实际存储在空接口对象中的值的类型不同于 `int`，所以在访问它时会发生类型错误。
+	//
+	//因此，我们应该非常小心地使用 `unsafe` 包中的函数和类型，确保只在必要的情况下使用，并且要进行充分的测试和验证，避免出现潜在的安全问题。
+
+	// note 是的，若要将一个指针强制转换为 `*emptyInterface` 类型的指针，该指针本身必须指向实现了 `interface{}` 接口的对象。
+	//
+	// note 通常情况下，我们不会直接使用 `unsafe.Pointer()` 函数和 `*emptyInterface` 类型的指针来进行类型转换，而是使用 Go 语言标准库中的反射库，比如 `reflect.ValueOf()` 和 `reflect.Ptr()` 等函数，来实现类似的操作。这些函数能够安全地处理类型转换、内存布局等问题，同时保证了代码的可读性和健壮性。
+	//
+	//总之，由于 `unsafe` 包中的函数和类型存在潜在的安全问题，因此在编写代码时应该谨慎使用，并且避免出现潜在的错误和漏洞。
+
+	// `unsafe.Pointer` 并不是一个 `int` 类型的指针，而是一个指向未知类型地址的指针。在具体实现中，它可能具有不同的大小和内部表示形式，取决于操作系统、硬件架构和编译器等因素。
+	//
+	//当我们使用 `&i` 取变量 `i` 的指针时，实际上得到的是一个指向 `i` 变量所在内存地址的指针，其类型为 `*int`。如果我们要将这个指针转换为其他类型的指针，并且需要越过类型系统进行访问，就必须使用 `unsafe.Pointer` 进行强制类型转换。这样做可以告诉编译器，我们知道自己在做什么，并且愿意承担由此带来的风险和不确定性。
+	//
+	//然而，使用 `unsafe.Pointer` 进行类型转换是非常危险的，容易导致内存泄漏、指针错误、类型错误和安全漏洞等问题。因此，在正常情况下，我们应该尽可能避免使用 `unsafe` 包中的函数和类型，以确保代码的安全性和可维护性。
 	eface := *(*emptyInterface)(unsafe.Pointer(&i))
 	return toType(eface.typ)
 }

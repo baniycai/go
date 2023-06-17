@@ -5,11 +5,11 @@
 package errors_test
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"reflect"
+	"std/errors"
 	"testing"
 )
 

@@ -400,7 +400,7 @@ func ValueOf(i any) Value {
 	// For now we make the contents always escape to the heap. It
 	// makes life easier in a few places (see chanrecv/mapassign
 	// comment below).
-	escapes(i)
+	escapes(i) // TODO: 奇怪了，为啥传的不是指针呀
 
 	return unpackEface(i)
 }
@@ -465,6 +465,10 @@ func typedmemmove(t *rtype, dst, src unsafe.Pointer)
 // Dummy annotation marking that the value x escapes,
 // for use in cases where the reflect code is so clever that
 // the compiler cannot follow.
+
+// 根据 Go 语言的规则，如果一个变量的地址被保存到了一个全局变量中，那么这个变量就会逃逸。
+// 因此，在这个例子中，如果 dummy.b 的值为真，那么 x 就会逃逸。否则，x 不会逃逸，
+// 也就是说，它的生命周期仅限于 escapes 函数的执行期间。
 func escapes(x any) {
 	if dummy.b {
 		dummy.x = x
