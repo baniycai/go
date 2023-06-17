@@ -116,13 +116,38 @@ func isEmpty(x uint8) bool {
 type hmap struct {
 	// Note: the format of the hmap is also encoded in cmd/compile/internal/reflectdata/reflect.go.
 	// Make sure this stays in sync with the compiler's definition.
-	count     int // # live cells == size of map.  Must be first (used by len() builtin)
-	flags     uint8
-	B         uint8  // log_2 of # of buckets (can hold up to loadFactor * 2^B items)
+	count int // # live cells == size of map.  Must be first (used by len() builtin)
+	flags uint8
+	//B的值总是2的幂次方。这是因为在哈希表中，桶的数量必须是2的幂次方才能保证散列到不同桶中的键值对数量足够均匀。
+	//在计算B的值时，Go语言会找到大于等于键值对数量的最小2的幂次方作为B的值。
+	//因为2的幂次方可以用二进制表示，所以使用2的幂次方作为B的值可以使得计算哈希函数时更加高效。
+	//需要注意的是，虽然B的值总是2的幂次方，但是哈希表中实际存储键值对的桶的数量可能会小于B的值。
+	//这是因为哈希表中的桶是根据需要动态分配的，如果某个桶中没有键值对存在，那么这个桶就不会被分配出来。
+
+	// 解释：为了使这些键值对能够均匀地散列到不同的桶中，我们希望任意两个键的哈希值不相等，并且哈希值的分布是均匀的。
+	//然而，在实际情况下，键的哈希值不可能完全均匀地分布在整个哈希值空间中，因此我们需要采取措施来尽可能地减少键的哈希值之间的冲突。
+	//其中一种方法就是通过将哈希表的桶的数量设置为2的幂次方来减少冲突。
+	//在这种情况下，哈希函数只需要考虑键的前几位即可确定键所属的桶，因为2的幂次方可以用二进制表示，所以使用2的幂次方作为桶的数量可以让哈希函数更加高效。
+	//另外，当哈希表的桶的数量为2的幂次方时，由于每个键的哈希值都是独立计算的，并且哈希函数只考虑键的前几位，
+	//所以可以保证任意两个不同的键散列到不同的桶中的概率非常高，从而减少了冲突的发生。
+	//因此，使用2的幂次方作为哈希表的桶的数量可以很好地保证散列到不同桶中的键值对数量足够均匀。
+	// TODO 还是没太看懂...
+	// 对于上述例子中的哈希表，假设我们使用的哈希函数是将键的值与一个随机数进行异或运算后再取模，得到一个哈希值。
+	//如果我们将哈希表分成16个桶，那么哈希函数只需要考虑键的前4位即可确定键所属的桶。
+	//举个例子，假设我们有如下10个键值对：
+	//{"a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": 6, "g": 7, "h": 8, "i": 9, "j": 10}
+	//在使用哈希函数将这些键散列到桶中时，先计算每个键的哈希值。假设我们使用的哈希函数是将键的值与一个随机数进行异或后再取模，得到的哈希值如下所示：
+	//"a": 9, "b": 2, "c": 11, "d": 15, "e": 3, "f": 1, "g": 4, "h": 13, "i": 5, "j": 7
+	//接着，根据这些哈希值确定每个键所属的桶。因为我们将哈希表分成了16个桶，而16是2的幂次方，所以只需要考虑每个键的哈希值的前4位即可确定它所属的桶。
+	//例如，对于键"a"，它的哈希值是9，转换成二进制后是1001，只需要考虑前4位即可，也就是1000，对应的十进制数字是8，因此键"a"散列到了第8个桶中。
+	//同理，其他键也可以根据这种方式确定所属的桶。
+	//最终，这个哈希表会被分成16个桶，每个桶中包含的键值对数量尽可能均匀，从而保证了查询效率和空间利用率的最优化。
+
+	B         uint8  // log_2 of # of buckets (can hold up to loadFactor * 2^B items)   哈希表的桶(bucket)数量
 	noverflow uint16 // approximate number of overflow buckets; see incrnoverflow for details
 	hash0     uint32 // hash seed
 
-	buckets    unsafe.Pointer // array of 2^B Buckets. may be nil if count==0.
+	buckets    unsafe.Pointer // array of 2^B Buckets. may be nil if count==0.  指向hash桶的第一个元素的指针
 	oldbuckets unsafe.Pointer // previous bucket array of half the size, non-nil only when growing
 	nevacuate  uintptr        // progress counter for evacuation (buckets less than this have been evacuated)
 
@@ -281,7 +306,7 @@ func (h *hmap) createOverflow() {
 }
 
 func makemap64(t *maptype, hint int64, h *hmap) *hmap {
-	if int64(int(hint)) != hint {
+	if int64(int(hint)) != hint { // note 见过好几个这种操作了，只允许大小为int，int的长度取决于架构，不过通常应该是64位啦，只是需要兼容特殊情况
 		hint = 0
 	}
 	return makemap(t, int(hint), h)
@@ -302,7 +327,7 @@ func makemap_small() *hmap {
 // If h != nil, the map can be created directly in h.
 // If h.buckets != nil, bucket pointed to can be used as the first bucket.
 func makemap(t *maptype, hint int, h *hmap) *hmap {
-	mem, overflow := math.MulUintptr(uintptr(hint), t.bucket.size)
+	mem, overflow := math.MulUintptr(uintptr(hint), t.bucket.size) // note 跟slice和chan一样，都是先计算下需要多少空间
 	if overflow || mem > maxAlloc {
 		hint = 0
 	}
@@ -315,6 +340,7 @@ func makemap(t *maptype, hint int, h *hmap) *hmap {
 
 	// Find the size parameter B which will hold the requested # of elements.
 	// For hint < 0 overLoadFactor returns false since hint < bucketCnt.
+	// note 结合负载因子，确定桶的大小
 	B := uint8(0)
 	for overLoadFactor(hint, B) {
 		B++
@@ -392,6 +418,9 @@ func makeBucketArray(t *maptype, b uint8, dirtyalloc unsafe.Pointer) (buckets un
 // the key is not in the map.
 // NOTE: The returned pointer may keep the whole map live, so don't
 // hold onto it for very long.
+
+// 返回指向h[key]的指针，永远非空，即使key不存在，也会返回一个指向一个初始化对象的指针；
+// note 返回的指针可能会导致整个map一直存活，所以不要hole住这个指针太长时间
 func mapaccess1(t *maptype, h *hmap, key unsafe.Pointer) unsafe.Pointer {
 	if raceenabled && h != nil {
 		callerpc := getcallerpc()
@@ -414,7 +443,7 @@ func mapaccess1(t *maptype, h *hmap, key unsafe.Pointer) unsafe.Pointer {
 	if h.flags&hashWriting != 0 {
 		fatal("concurrent map read and map write")
 	}
-	hash := t.hasher(key, uintptr(h.hash0))
+	hash := t.hasher(key, uintptr(h.hash0)) // note key+种子+哈希函数=hash值
 	m := bucketMask(h.B)
 	b := (*bmap)(add(h.buckets, (hash&m)*uintptr(t.bucketsize)))
 	if c := h.oldbuckets; c != nil {
