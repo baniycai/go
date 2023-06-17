@@ -452,6 +452,12 @@ func mProf_Free(b *bucket, size uintptr) {
 	unlock(&profMemFutureLock[index])
 }
 
+// CPU ticks（时钟周期）是指中央处理器（CPU）的基本计时单位，通常用来衡量程序的运行时间或计算机的性能。一个 CPU tick 是 CPU 在执行时使用的最小时间单位。
+//
+// 在现代计算机中，CPU ticks 的速度通常被用作衡量 CPU 性能的指标。较高的 CPU 频率和较短的 CPU tick 周期可以使 CPU 更快地完成指令。
+// 不过，在实际应用中，CPU 频率不是唯一决定 CPU 性能的因素，还有诸如指令级并行、流水线、缓存等其他因素也会影响 CPU 的性能表现。
+//
+// 对于程序员来说，CPU ticks 可以作为一种衡量程序效率和性能的指标。通过测量程序执行所需的 CPU ticks 数量，可以评估程序的运行效率，并进行优化来提高程序性能。
 var blockprofilerate uint64 // in CPU ticks
 
 // SetBlockProfileRate controls the fraction of goroutine blocking events

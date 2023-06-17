@@ -101,12 +101,12 @@
 package runtime
 
 import (
-	"internal/goarch"
-	"internal/goos"
-	"runtime/internal/atomic"
-	"runtime/internal/math"
-	"runtime/internal/sys"
-	"unsafe"
+	"std/internal/goarch"
+	"std/internal/goos"
+	"std/runtime/internal/atomic"
+	"std/runtime/internal/math"
+	"std/runtime/internal/sys"
+	"std/unsafe"
 )
 
 const (
@@ -209,6 +209,25 @@ const (
 	// to a 48-bit address space like every other arm64 platform.
 	//
 	// WebAssembly currently has a limit of 4GB linear memory.
+
+	// note 这段代码的作用是根据当前系统架构和操作系统，计算出堆地址所占用的位数（heapAddrBits）。
+	//首先，这个表达式会被分为三部分，并使用加号连接：
+	//```
+	//heapAddrBits = part1 + part2 + part3
+	//```
+	//其中第一部分是：
+	//(_64bit*(1-goarch.IsWasm)*(1-goos.IsIos*goarch.IsArm64))*48
+	//```
+	//这个表达式的作用是，在当前架构是 64 位（_64bit 等于 1）并且不是 WebAssembly 平台（goarch.IsWasm 等于 0）以及不是在 iOS 的 arm64 架构下（goos.IsIos 和 goarch.IsArm64 都等于 1），将 part1 设置为 48。否则，part1 就是 0。
+	//第二部分是：
+	//(1-_64bit+goarch.IsWasm)*(32-(goarch.IsMips+goarch.IsMipsle))
+	//```
+	//这个表达式的作用是，在当前架构是 64 位（_64bit 等于 1）或者是 WebAssembly 平台（goarch.IsWasm 等于 1），且不是 MIPS 架构（goarch.IsMips 和 goarch.IsMipsle 都等于 0）时，将 part2 设置为 32。如果不满足这些条件，则 part2 为 0。
+	//第三部分是：
+	//40*goos.IsIos*goarch.IsArm64
+	//```
+	//这个表达式的作用是，在当前操作系统是 iOS 且架构是 arm64 时（goos.IsIos 和 goarch.IsArm64 都等于 1），将 part3 设置为 40。否则，part3 为 0。
+	//最终，将三个部分相加得到堆地址所占用的位数。
 	heapAddrBits = (_64bit*(1-goarch.IsWasm)*(1-goos.IsIos*goarch.IsArm64))*48 + (1-_64bit+goarch.IsWasm)*(32-(goarch.IsMips+goarch.IsMipsle)) + 40*goos.IsIos*goarch.IsArm64
 
 	// maxAlloc is the maximum size of an allocation. On 64-bit,
@@ -839,6 +858,9 @@ func (c *mcache) nextFree(spc spanClass) (v gclinkptr, s *mspan, shouldhelpgc bo
 // Allocate an object of size bytes.
 // Small objects are allocated from the per-P cache's free lists.
 // Large objects (> 32 kB) are allocated straight from the heap.
+
+// 分配指定大小字节、指定类型的对象，小对象直接放在每个P的cache中，大对象分配到堆中；过程中还要考虑垃圾回收问题，可能处理一半就跑去垃圾回收了...
+// todo 没看完，后面贼吉尔复杂
 func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	if gcphase == _GCmarktermination {
 		throw("mallocgc called with gcphase == _GCmarktermination")
@@ -899,6 +921,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 		// for internal fragmentation at the end of mallocgc.
 		assistG.gcAssistBytes -= int64(size)
 
+		// note 当前G信用度不够了，先协助垃圾♻️，再来分配内存
 		if assistG.gcAssistBytes < 0 {
 			// This G is in debt. Assist the GC to correct
 			// this before allocating. This must happen
@@ -907,7 +930,8 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 		}
 	}
 
-	// Set mp.mallocing to keep from being preempted by GC.
+	// Set mp.mallocing to keep from being preempted(被抢占) by GC.
+	// note 将g的m设为正在进行内存分配，防止被gc抢占了
 	mp := acquirem()
 	if mp.mallocing != 0 {
 		throw("malloc deadlock")
@@ -919,7 +943,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 
 	shouldhelpgc := false
 	dataSize := userSize
-	c := getMCache(mp)
+	c := getMCache(mp) // 获取m的cache
 	if c == nil {
 		throw("mallocgc called without a P or outside bootstrapping")
 	}

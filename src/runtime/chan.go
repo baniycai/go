@@ -18,10 +18,10 @@ package runtime
 //  c.qcount < c.dataqsiz implies that c.sendq is empty.
 
 import (
-	"internal/abi"
-	"runtime/internal/atomic"
-	"runtime/internal/math"
-	"unsafe"
+	"std/internal/abi"
+	"std/runtime/internal/atomic"
+	"std/runtime/internal/math"
+	"std/unsafe"
 )
 
 const (
@@ -31,15 +31,15 @@ const (
 )
 
 type hchan struct {
-	qcount   uint           // total data in the queue
-	dataqsiz uint           // size of the circular queue
-	buf      unsafe.Pointer // points to an array of dataqsiz elements
+	qcount   uint           // total data in the queue  目前队列中总容量
+	dataqsiz uint           // size of the circular queue   非阻塞chan的容量
+	buf      unsafe.Pointer // points to an array of dataqsiz elements  指向非阻塞chan的元素的指针
 	elemsize uint16
 	closed   uint32
 	elemtype *_type // element type
 	sendx    uint   // send index
 	recvx    uint   // receive index
-	recvq    waitq  // list of recv waiters
+	recvq    waitq  // list of recv waiters   接受者等待队列
 	sendq    waitq  // list of send waiters
 
 	// lock protects all fields in hchan, as well as several
@@ -80,7 +80,7 @@ func makechan(t *chantype, size int) *hchan {
 		throw("makechan: bad alignment")
 	}
 
-	mem, overflow := math.MulUintptr(elem.size, uintptr(size))
+	mem, overflow := math.MulUintptr(elem.size, uintptr(size)) // note 每个元素大小*元素数量
 	if overflow || mem > maxAlloc-hchanSize || size < 0 {
 		panic(plainError("makechan: size out of range"))
 	}
@@ -93,13 +93,13 @@ func makechan(t *chantype, size int) *hchan {
 	switch {
 	case mem == 0:
 		// Queue or element size is zero.
-		c = (*hchan)(mallocgc(hchanSize, nil, true))
+		c = (*hchan)(mallocgc(hchanSize, nil, true)) // note 阻塞chan，只需要分配hchanSize大小的空间
 		// Race detector uses this location for synchronization.
 		c.buf = c.raceaddr()
 	case elem.ptrdata == 0:
 		// Elements do not contain pointers.
 		// Allocate hchan and buf in one call.
-		c = (*hchan)(mallocgc(hchanSize+mem, nil, true))
+		c = (*hchan)(mallocgc(hchanSize+mem, nil, true)) // note 非阻塞chan，分配hchanSize+元素空间
 		c.buf = add(unsafe.Pointer(c), hchanSize)
 	default:
 		// Elements contain pointers.
@@ -119,6 +119,7 @@ func makechan(t *chantype, size int) *hchan {
 }
 
 // chanbuf(c, i) is pointer to the i'th slot in the buffer.
+// 指向chan的第i个元素的地址
 func chanbuf(c *hchan, i uint) unsafe.Pointer {
 	return add(c.buf, uintptr(i)*uintptr(c.elemsize))
 }
@@ -131,7 +132,7 @@ func full(c *hchan) bool {
 	// c.dataqsiz is immutable (never written after the channel is created)
 	// so it is safe to read at any time during channel operation.
 	if c.dataqsiz == 0 {
-		// Assumes that a pointer read is relaxed-atomic.
+		// Assumes that a pointer read is relaxed-atomic(弱原子?).
 		return c.recvq.first == nil
 	}
 	// Assumes that a uint read is relaxed-atomic.
@@ -205,7 +206,7 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 		unlock(&c.lock)
 		panic(plainError("send on closed channel"))
 	}
-
+	// note 从接受者等待队列头弹出一个元素
 	if sg := c.recvq.dequeue(); sg != nil {
 		// Found a waiting receiver. We pass the value we want to send
 		// directly to the receiver, bypassing the channel buffer (if any).
@@ -291,6 +292,8 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 // Channel c must be empty and locked.  send unlocks c with unlockf.
 // sg must already be dequeued from c.
 // ep must be non-nil and point to the heap or the caller's stack.
+
+// sg是接受者，ep是传递的信息
 func send(c *hchan, sg *sudog, ep unsafe.Pointer, unlockf func(), skip int) {
 	if raceenabled {
 		if c.dataqsiz == 0 {
@@ -767,6 +770,7 @@ func (q *waitq) enqueue(sgp *sudog) {
 	q.last = sgp
 }
 
+// 从队列头弹出一个元素
 func (q *waitq) dequeue() *sudog {
 	for {
 		sgp := q.first

@@ -5,11 +5,11 @@
 package runtime
 
 import (
-	"internal/abi"
-	"internal/goarch"
-	"runtime/internal/math"
-	"runtime/internal/sys"
-	"unsafe"
+	"std/internal/abi"
+	"std/internal/goarch"
+	"std/runtime/internal/math"
+	"std/runtime/internal/sys"
+	"std/unsafe"
 )
 
 type slice struct {
@@ -86,14 +86,14 @@ func makeslicecopy(et *_type, tolen int, fromlen int, from unsafe.Pointer) unsaf
 }
 
 func makeslice(et *_type, len, cap int) unsafe.Pointer {
-	mem, overflow := math.MulUintptr(et.size, uintptr(cap))
+	mem, overflow := math.MulUintptr(et.size, uintptr(cap)) // note 每个元素的大小*cap得到需要的总空间大小
 	if overflow || mem > maxAlloc || len < 0 || len > cap {
 		// NOTE: Produce a 'len out of range' error instead of a
 		// 'cap out of range' error when someone does make([]T, bignumber).
 		// 'cap out of range' is true too, but since the cap is only being
 		// supplied implicitly, saying len is clearer.
 		// See golang.org/issue/4085.
-		mem, overflow := math.MulUintptr(et.size, uintptr(len))
+		mem, overflow := math.MulUintptr(et.size, uintptr(len)) // note cap需要的空间太大了，则用len*size来搞
 		if overflow || mem > maxAlloc || len < 0 {
 			panicmakeslicelen()
 		}
@@ -199,16 +199,37 @@ func growslice(et *_type, old slice, cap int) slice {
 
 	newcap := old.cap
 	doublecap := newcap + newcap
-	if cap > doublecap {
+	if cap > doublecap { // note  requirecap>doublecap，=requirecap
 		newcap = cap
-	} else {
+	} else { //  note requirecap<doublecap
 		const threshold = 256
-		if old.cap < threshold {
+		if old.cap < threshold { // note cap没到达256这个阈值，=doublecap
 			newcap = doublecap
 		} else {
 			// Check 0 < newcap to detect overflow
 			// and prevent an infinite loop.
-			for 0 < newcap && newcap < cap {
+
+			// 如果你采用每次增加原大小的50%的方式来扩容，当切片容量比较小的时候，这种方式可以快速扩大容量；但当容量比较大的时候，仍然按照每次增加50%的方式，可能会造成内存分配过多，导致内存浪费。
+			//
+			//另外，如果采用固定的增长率，可能会出现以下两种情况：
+			//
+			//当容量比较小时，增长率不足以快速扩容。
+			//当容量比较大时，增长率过低，可能使得切片无法满足需求，导致内存浪费。
+			//因此，需要一种平滑过渡的扩容策略，通过动态调整增长率，使得切片在容量不断增大的情况下，能够实现高效、稳定的内存分配。
+			//具体而言，逐步降低增长率能够使得增长速度慢慢减缓，同时保证内存分配的效率和使用的空间，避免了内存的浪费。
+			//
+			//需要注意的是，平滑过渡的扩容策略并不是唯一的选择，具体的扩容策略可以根据实际应用场景的需求进行调整。
+
+			// note 这个增加原值的25%和一个固定的阈值256的75%的计算方法，是为了让新容量的增长率逐渐减小，从而使得增长过程更加平滑。
+			//
+			//具体来说，当切片容量比较小时，增长率接近50%，newcap会快速增长；随着newcap的增大，增长率会逐渐减小，newcap增长趋于缓慢，最终达到每次增加25%的稳定状态。
+			//如果采用固定的增长率，可能会造成在容量较小时内存分配过多，导致内存浪费；而在容量较大时增长率过低，则可能会导致切片无法满足需求。
+			//
+			//具体地，(newcap + 3*threshold) / 4 表示将newcap的大小增加原有大小的25%和一个固定的阈值(3*threshold)的大小之和，然后再除以4，从而获得新的容量大小。
+			//其中，阈值threshold 的设定是为了确保在切片容量较小时，增长率能够达到50%，使得容量可以快速增长；而随着容量的增大，增长率会逐渐减小，直到最终稳定在25%左右，防止出现内存浪费。
+			// note 按我理解，应该是一开始newcap比较小，显得threshold比较大，占比比较高，75%+25%cap实现一个类似50%的效果，后面newcap数量上来了，threshold的大小就几乎可以忽略了，基本就是25%cap增长了
+			// 没有直接25%cap，可能去怕一开始cap太小了，25%增长比较慢，所以加个75%threshold来帮一下；不过它这里是用个for循环的，我雀氏有点震惊
+			for 0 < newcap && newcap < cap { // note 至少要比cap大
 				// Transition from growing 2x for small slices
 				// to growing 1.25x for large slices. This formula
 				// gives a smooth-ish transition between the two.
@@ -223,16 +244,21 @@ func growslice(et *_type, old slice, cap int) slice {
 	}
 
 	var overflow bool
+	// lenmem->old.len,newlenmem->调用该函数欲申请的cap,capmem->实际计算出来要申请的cap
 	var lenmem, newlenmem, capmem uintptr
 	// Specialize for common values of et.size.
 	// For 1 we don't need any division/multiplication.
 	// For goarch.PtrSize, compiler will optimize division/multiplication into a shift by a constant.
 	// For powers of 2, use a variable shift.
+	// 专用于 et.size 的公共值。
+	// 对于 1，我们不需要任何除法/乘法。
+	// 对于 goarch.PtrSize，编译器会将除法/乘法优化为一个常量移位。
+	// 对于 2 的幂，使用变量 shift。
 	switch {
 	case et.size == 1:
 		lenmem = uintptr(old.len)
 		newlenmem = uintptr(cap)
-		capmem = roundupsize(uintptr(newcap))
+		capmem = roundupsize(uintptr(newcap)) // 需要分配的内存块大小
 		overflow = uintptr(newcap) > maxAlloc
 		newcap = int(capmem)
 	case et.size == goarch.PtrSize:
@@ -278,7 +304,7 @@ func growslice(et *_type, old slice, cap int) slice {
 	if overflow || capmem > maxAlloc {
 		panic(errorString("growslice: cap out of range"))
 	}
-
+	// note 分配内存(这里返回的p应该是分配的内存的字段)，并copy旧slice的array，包装一个新的slice返回
 	var p unsafe.Pointer
 	if et.ptrdata == 0 {
 		p = mallocgc(capmem, nil, false)
@@ -299,6 +325,7 @@ func growslice(et *_type, old slice, cap int) slice {
 	return slice{p, old.len, newcap}
 }
 
+// tag 算法，力扣常见算法，嘿嘿
 func isPowerOfTwo(x uintptr) bool {
 	return x&(x-1) == 0
 }

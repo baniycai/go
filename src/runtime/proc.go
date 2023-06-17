@@ -343,6 +343,15 @@ func goschedguarded() {
 // Reason explains why the goroutine has been parked. It is displayed in stack
 // traces and heap dumps. Reasons should be unique and descriptive. Do not
 // re-use reasons, add new ones.
+
+// gopark方法的作用是将当前的goroutine（协程）置于等待状态，并在系统栈上调用unlockf函数。如果unlockf返回false，那么goroutine会被恢复。
+//
+// 需要注意的是，unlockf函数不能访问此G的栈，因为在gopark调用和unlockf调用之间，G的栈可能已经被移动。
+//
+// 另外，需要注意的是，由于unlockf函数是在将G置于等待状态后调用的，
+// 因此在没有外部同步机制防止G被准备好的情况下，G可能已经被准备好了。如果unlockf返回false，则必须保证G无法被外部准备好。
+//
+// 在注释中还提到，Reason字段解释了为什么goroutine被parked（停留）。它在堆栈跟踪和堆转储中显示。Reason应该是唯一且描述性的，不要重复使用，添加新的原因即可。
 func gopark(unlockf func(*g, unsafe.Pointer) bool, lock unsafe.Pointer, reason waitReason, traceEv byte, traceskip int) {
 	if reason != waitReasonSleep {
 		checkTimeouts() // timeouts may expire while two goroutines keep the scheduler busy

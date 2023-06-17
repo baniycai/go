@@ -502,6 +502,22 @@ type g struct {
 	// scan work. We track this in bytes to make it fast to update
 	// and check for debt in the malloc hot path. The assist ratio
 	// determines how this corresponds to scan work debt.
+
+	// 当垃圾回收器发现某个Goroutine所负责的区域内需要进行垃圾回收时，如果该Goroutine正在执行用户代码，
+	// 则垃圾回收器会请求其他Goroutine的协助来完成垃圾回收工作，这就是垃圾回收辅助的过程
+
+	// 在Go语言的垃圾回收机制中，每个Goroutine（以下简称G）负责管理一段内存区域。当这个区域中的内存达到一定阈值时，垃圾回收器就会触发垃圾回收操作。
+	//在进行垃圾回收的过程中，每个G都需要扫描自己所管理的内存区域，并标记出哪些是可回收的垃圾对象。
+	//这个扫描工作会占用一定的计算资源，因此如果每次垃圾回收都需要所有的G都去执行扫描工作，会对程序的性能造成很大的影响。
+	//为了解决这个问题，Go语言的垃圾回收机制引入了“协助信用度”的概念，即上文中提到的gcAssistBytes变量。
+	//如果一个G的协助信用度为正数，说明该G还有足够的余地可以不参与当前的垃圾回收操作，而是继续执行用户代码；
+	//反之，如果一个G的协助信用度为负数，则该G必须参与当前的垃圾回收操作，以完成垃圾扫描工作。
+	//通过协助信用度的机制，可以让一些G在不进行垃圾回收辅助的情况下，继续执行用户代码，从而提高程序的性能。
+	//当然，如果所有的G都没有足够的协助信用度，则需要所有的G都参与垃圾回收辅助。
+
+	// 这个变量表示一个Goroutine（以下简称G）的GC协助信用度，以分配的字节数来衡量。
+	//如果这个数字是正数，说明这个G还有一定的信用度可以不需要进行垃圾回收辅助；如果这个数字是负数，说明这个G必须通过执行扫描工作来进行垃圾回收辅助。
+	//将这个值记录为字节数，是为了在malloc过程中更快地更新和检查债务。同时，此系数也决定了如何将其与扫描工作债务对应起来
 	gcAssistBytes int64
 }
 
@@ -518,9 +534,9 @@ const (
 
 // Values for m.freeWait.
 const (
-	freeMStack = 0  // M done, free stack and reference.
-	freeMRef   = 1  // M done, free reference.
-	freeMWait  = 2  // M still in use.
+	freeMStack = 0 // M done, free stack and reference.
+	freeMRef   = 1 // M done, free reference.
+	freeMWait  = 2 // M still in use.
 )
 
 type m struct {
@@ -542,7 +558,7 @@ type m struct {
 	nextp         puintptr
 	oldp          puintptr // the p that was attached before executing a syscall
 	id            int64
-	mallocing     int32
+	mallocing     int32 // 是否正在进行内存分配工作
 	throwing      throwType
 	preemptoff    string // if != "", keep curg running on this m
 	locks         int32
@@ -552,7 +568,7 @@ type m struct {
 	blocked       bool // m is blocked on a note
 	newSigstack   bool // minit on C thread called sigaltstack
 	printlock     int8
-	incgo         bool   // m is executing a cgo call
+	incgo         bool          // m is executing a cgo call
 	freeWait      atomic.Uint32 // Whether it is safe to free g0 and delete m (one of freeMRef, freeMStack, freeMWait)
 	fastrand      uint64
 	needextram    bool

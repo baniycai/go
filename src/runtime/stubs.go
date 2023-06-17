@@ -14,7 +14,7 @@ import (
 // Should be a built-in for unsafe.Pointer?
 //
 //go:nosplit
-func add(p unsafe.Pointer, x uintptr) unsafe.Pointer {
+func add(p unsafe.Pointer, x uintptr) unsafe.Pointer { // note 地址值相加
 	return unsafe.Pointer(uintptr(p) + x)
 }
 
@@ -106,6 +106,32 @@ func reflect_memclrNoHeapPointers(ptr unsafe.Pointer, n uintptr) {
 	memclrNoHeapPointers(ptr, n)
 }
 
+// memmove 确保“from”中的任何指针都以不可分割的方式写入“to”，这样活泼的读取就无法观察到写了一半的指针。
+// 这是防止垃圾收集器观察无效指针所必需的，并且不同于非托管语言中的 memmove
+// 但是，如果“from”和“to”可能包含指针，则 memmove 只需要这样做，如果“from”、“to”和“n”都是字对齐的，这只能是这种情况.
+//
+
+// TODO 这里有点歧义，个人认为，禁止逃逸分析就是完全分配到栈上了!但gpt说不是
+
+// 使用指令 //go:noescape 可以让编译器不对某个函数进行逃逸分析。这样就可以 note 尽可能(注意关键词)地减少逃逸，从而减小内存分配和垃圾回收的负担，提高程序的性能
+
+// 如果你在使用 go:noescape 指令禁止逃逸分析的同时，返回了一个指向函数内部局部变量的指针，则这个指针对应的对象会被分配在栈上而不是堆上。
+//需要注意的是，如果这个指针所指向的对象在函数调用结束之后仍然需要被使用，那么这个对象就不能再分配在栈上了，而需要分配在堆上。
+//如果编译器进行了逃逸分析，并认为这个对象需要在堆上分配，那么即使使用了 go:noescape 指令，这个对象也会在堆上分配。
+//因此，在使用 go:noescape 指令时，需要确保返回值不包含指向函数作用域之外的变量的指针，否则可能会导致内存访问错误或者未定义行为等问题。
+
+// 使用 go:noescape 指令的主要目的是为了优化函数性能，通过减少逃逸的发生来降低内存分配和垃圾回收的负担。
+//虽然使用 go:noescape 指令并不保证所有对象都被分配在栈上，但是当编译器无法进行逃逸分析时，
+//通过使用该指令可以确保 note 尽可能多地将对象分配在栈上而非堆上。在某些情况下，这可能会对程序性能产生积极的影响。
+//此外，使用 go:noescape 指令也有助于加强代码的安全性，因为它显式地告诉了编译器该函数中的指针不应该逃逸到函数作用域之外。
+//这样可以避免在函数调用结束后访问已经失效的指针，从而提高了代码的可靠性。
+//总之，尽管使用 go:noescape 指令并不能完全消除逃逸的发生，但它仍然可以提供一定的优化和安全性保障，具体是否使用需要根据实际情况进行权衡。
+
+// 以下是一些使用 go:noescape 指令的例子：
+//字符串切片操作：如果函数需要对一个字符串进行切片操作并返回切片，通常情况下编译器会将切片分配在堆上，因为切片指向了原始字符串的内存空间。但实际上，这个切片只有在函数调用过程中才会被使用，所以可以使用 go:noescape 指令来禁止逃逸分析，让切片分配在栈上，从而提高程序性能。
+//链表操作：某些链表操作可能需要返回链表节点的指针，但这个指针通常只在函数调用过程中被使用，不需要在堆上分配。可以使用 go:noescape 指令来禁止逃逸分析，让链表节点的指针分配在栈上，从而提高程序性能。
+//排序算法：排序算法通常需要创建大量的临时对象，这些对象容易导致逃逸。可以使用 go:noescape 指令来禁止逃逸分析，让这些对象分配在栈上，从而减少内存分配和垃圾回收的负担，提高程序性能。
+
 // memmove copies n bytes from "from" to "to".
 //
 // memmove ensures that any pointer in "from" is written to "to" with
@@ -119,7 +145,7 @@ func reflect_memclrNoHeapPointers(ptr unsafe.Pointer, n uintptr) {
 // Implementations are in memmove_*.s.
 //
 //go:noescape
-func memmove(to, from unsafe.Pointer, n uintptr)
+func memmove(to, from unsafe.Pointer, n uintptr) // 汇编实现
 
 // Outside assembly calls memmove. Make sure it has ABI wrappers.
 //
@@ -425,6 +451,12 @@ func call1073741824(typ, fn, stackArgs unsafe.Pointer, stackArgsSize, stackRetOf
 func systemstack_switch()
 
 // alignUp rounds n up to a multiple of a. a must be a power of 2.
+// tag 算法
+// 使用 &^ 运算符实现了将数字 n 向上舍入到指定对齐大小 a 的倍数的功能。
+// 具体而言，我们执行的是 (n + a - 1) &^ (a - 1) 的操作，
+// 即先将 n 加上 a - 1，得到向上舍入后最接近 n 的 a 的倍数，
+// 然后再用 a - 1 进行按位取反，note 得到比 n 大的最小的 a 的倍数
+// note &^=先对后面^,再和前面&，实现的效果：如果第二个的指定位为1，则第一个的指定位为0；如果第二个为0，则第一个不变
 func alignUp(n, a uintptr) uintptr {
 	return (n + a - 1) &^ (a - 1)
 }
@@ -436,8 +468,21 @@ func alignDown(n, a uintptr) uintptr {
 
 // divRoundUp returns ceil(n / a).
 func divRoundUp(n, a uintptr) uintptr {
+
 	// a is generally a power of two. This will get inlined and
 	// the compiler will optimize the division.
+
+	// tag 算法 note 内联展开（inline expansion）是指编译器在编译过程中，将被调用的函数或方法的代码直接嵌入到调用其它地方的函数或方法的代码中，从而避免了函数调用的开销。
+	//被内联展开的函数或方法会在编译时替换成它的实际代码，而不是在运行时进行函数调用的开销。
+	//
+	//内联展开可以提高程序的性能，因为函数调用本身需要额外的开销，如参数传递、栈帧的创建和销毁等。
+	//而内联展开则直接将被调用的函数的代码插入到调用的位置，避免了这些开销。在一些情况下，特别是对于性能关键的代码段，手动进行内联展开是一种常见的优化手段。
+	//
+	//在 Golang 中，如果一个函数的代码体积比较小，且该函数经常被调用，编译器会自动将其内联展开。
+	//通过使用 go build -gcflags=-m 命令可以查看编译器是否对某个函数进行内联展开。
+
+	// note 除法向上取整，+(a-1)的目的是为了补偿n/a的余数与a之间的差距，从而实现向上取整；如果+的是a，那在n/a刚好整除的时候就会出问题了
+	// 因为a刚好是2的整数次幂，所以这里的除法操作能够被编译器优化成移位操作，从而提高代码的性能
 	return (n + a - 1) / a
 }
 
