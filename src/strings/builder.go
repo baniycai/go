@@ -13,7 +13,7 @@ import (
 // It minimizes memory copying. The zero value is ready to use.
 // Do not copy a non-zero Builder.
 type Builder struct {
-	addr *Builder // of receiver, to detect copies by value
+	addr *Builder // of receiver, to detect copies by value   指向自己的指针
 	buf  []byte
 }
 

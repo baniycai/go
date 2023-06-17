@@ -242,14 +242,14 @@ type Request struct {
 	// field's query parameters and the PATCH, POST, or PUT form data.
 	// This field is only available after ParseForm is called.
 	// The HTTP client ignores Form and uses Body instead.
-	Form url.Values
+	Form url.Values // NOTE 对于POST, PUT, and PATCH这几种请求，从body中解析出来的+所有类型的请求从rawQuery中解析出来的，body解析出来的优先级更高
 
 	// PostForm contains the parsed form data from PATCH, POST
 	// or PUT body parameters.
 	//
 	// This field is only available after ParseForm is called.
 	// The HTTP client ignores PostForm and uses Body instead.
-	PostForm url.Values
+	PostForm url.Values // NOTE 对于POST, PUT, and PATCH这几种请求，从body中解析出来的
 
 	// MultipartForm is the parsed multipart form, including file uploads.
 	// This field is only available after ParseMultipartForm is called.
@@ -1272,6 +1272,14 @@ func parsePostForm(r *Request) (vs url.Values, err error) {
 //
 // ParseMultipartForm calls ParseForm automatically.
 // ParseForm is idempotent.
+
+/*
+NOTE http请求参数有两个来源，一是raw query，即url尾巴带的，二是body体的
+对于所有类型的请求ParseForm都会将raw query解析到Form中
+对于POST, PUT, and PATCH这几种请求，ParseForm还会解析reqbody的，解析的结果同时放到Form和PostForm中。在Form中，body的优先级更高，即body的key值会覆盖raw query的相同key的值
+当Content-Type != application/x-www-form-urlencoded时，不会解析reqbody的内容，即此时PostForm的内容为空
+ParseMultipartForm中会自动调用ParseForm方法
+*/
 func (r *Request) ParseForm() error {
 	var err error
 	if r.PostForm == nil {
@@ -1315,6 +1323,11 @@ func (r *Request) ParseForm() error {
 // If ParseForm returns an error, ParseMultipartForm returns it but also
 // continues parsing the request body.
 // After one call to ParseMultipartForm, subsequent calls have no effect.
+
+/*
+NOTE ParseMultipartForm是幂等操作，其将reqBody解析为multipart/form-data，最多maxMemory个字节的文件部分会被存在内存中,剩下的存储在磁盘的临时文件中
+该方法会在需要的时候调用ParseForm方法，ParseForm方法的error不会影响到该方法的解析
+*/
 func (r *Request) ParseMultipartForm(maxMemory int64) error {
 	if r.MultipartForm == multipartByReader {
 		return errors.New("http: multipart handled by MultipartReader")

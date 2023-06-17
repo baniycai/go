@@ -7,10 +7,10 @@ package testing_test
 import (
 	"flag"
 	"fmt"
-	"internal/testenv"
 	"os"
 	"os/exec"
 	"regexp"
+	"std/internal/testenv"
 	"strings"
 	"testing"
 )

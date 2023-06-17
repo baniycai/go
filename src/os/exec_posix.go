@@ -7,9 +7,9 @@
 package os
 
 import (
-	"internal/itoa"
-	"internal/syscall/execenv"
 	"runtime"
+	"std/internal/itoa"
+	"std/internal/syscall/execenv"
 	"syscall"
 )
 

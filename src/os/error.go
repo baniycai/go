@@ -5,9 +5,9 @@
 package os
 
 import (
-	"internal/oserror"
-	"internal/poll"
 	"io/fs"
+	"std/internal/oserror"
+	"std/internal/poll"
 )
 
 // Portable analogs of some common system call errors.

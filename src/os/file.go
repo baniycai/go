@@ -41,12 +41,12 @@ package os
 
 import (
 	"errors"
-	"internal/poll"
-	"internal/testlog"
-	"internal/unsafeheader"
 	"io"
 	"io/fs"
 	"runtime"
+	"std/internal/poll"
+	"std/internal/testlog"
+	"std/internal/unsafeheader"
 	"syscall"
 	"time"
 	"unsafe"

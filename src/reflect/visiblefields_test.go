@@ -5,7 +5,7 @@
 package reflect_test
 
 import (
-	. "reflect"
+	. "std/reflect"
 	"strings"
 	"testing"
 )

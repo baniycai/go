@@ -5,7 +5,7 @@
 package bytealg
 
 import (
-	"internal/cpu"
+	"std/internal/cpu"
 	"unsafe"
 )
 

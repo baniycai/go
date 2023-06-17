@@ -5,8 +5,8 @@
 package os_test
 
 import (
-	. "os"
 	"reflect"
+	. "std/os"
 	"strings"
 	"testing"
 )

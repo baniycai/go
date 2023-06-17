@@ -1008,6 +1008,7 @@ func (f *FlagSet) Var(value Value, name string, usage string) {
 // caller could create a flag that turns a comma-separated string into a slice
 // of strings by giving the slice the methods of Value; in particular, Set would
 // decompose the comma-separated string into the slice.
+// NOTE 跟flag.Bool其实差不多啦，不同的是这里传入了value，是个指针，到时候flag.parse()会将值写入到value中，外界就可以直接使用value啦
 func Var(value Value, name string, usage string) {
 	CommandLine.Var(value, name, usage)
 }

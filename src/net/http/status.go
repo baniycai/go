@@ -78,6 +78,7 @@ const (
 
 // StatusText returns a text for the HTTP status code. It returns the empty
 // string if the code is unknown.
+// 状态码转文字，这个感觉蛮有用的
 func StatusText(code int) string {
 	switch code {
 	case StatusContinue:

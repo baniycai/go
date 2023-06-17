@@ -16,14 +16,14 @@ import (
 	"log"
 	"math/rand"
 	"net/textproto"
-	"net/url"
-	urlpkg "net/url"
 	"path"
 	"runtime"
 	"sort"
 	"std/bufio"
 	"std/internal/godebug"
 	"std/net"
+	"std/net/url"
+	urlpkg "std/net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -83,6 +83,13 @@ var (
 // RST_STREAM, depending on the HTTP protocol. To abort a handler so
 // the client sees an interrupted response but the server doesn't log
 // an error, panic with the value ErrAbortHandler.
+// NOTE golang net包中最关键的一个接口了吧属于是，实现了这个接口就能成为一个Handler来处理http请求
+// 大部分web框架基本都是实现了这个接口，接收到请求后再在内部做路由，找到对应的handler来处理请求
+// 有几个点要注意的：
+// ①取决于http客户端、服务端和http协议版本等因素，大部分场景下都不能在将响应写到ResponseWriter后再去从Request.Body中读取，即必须先读数据再返回数据
+// ②handlers不能修改Request
+// ③server会帮我们recover ServeHTTP的panic，并打印错误日志，之后关闭网络连接
+// ④为了让server在panic的时候不打印日志，让客户端看到一个中断的响应，我们可以传入一个ErrAbortHandler
 type Handler interface {
 	ServeHTTP(ResponseWriter, *Request)
 }
@@ -136,6 +143,8 @@ type ResponseWriter interface {
 	// writing the response. However, such behavior may not be supported
 	// by all HTTP/2 clients. Handlers should read before writing if
 	// possible to maximize compatibility.
+	// NOTE 主要是写消息正文吧，主要还没调用WriteHeader写状态行，则自己调用WriteHeader(http.StatusOK)写个200ok
+	// 如果响应头没有Content-Type，则调用DetectContentType方法，使用一个算法来检测是发送的data是什么类型的，自己加上一个Content-Type
 	Write([]byte) (int, error)
 
 	// WriteHeader sends an HTTP response header with the provided
@@ -156,6 +165,11 @@ type ResponseWriter interface {
 	// The server will automatically send a 100 (Continue) header
 	// on the first read from the request body if the request has
 	// an "Expect: 100-continue" header.
+	/* NOTE 根据提供的statusCode来发送一个http响应头，如果在调用Write之前没有调用过WriteHeader，则在第一次调用时会
+	触发一次WriteHeader调用，写入200响应行；调用WriteHeader主要是用来发送错误码或者1xx之类的响应，也就是说请求正常处理后只需要调用Write就够了
+	statusCode为1xx则请求会被立即发送，但为2xx-5xx时则写入buf，调用Flusher后才进行发送buf，即写入2xx-5xx后，还可以写响应体
+	*/
+	// NOTE 感觉也不是header，就是个状态码而已，为啥叫header呢，是因为该状态码在响应请求中的头部行吗
 	WriteHeader(statusCode int)
 }
 
@@ -170,6 +184,7 @@ type ResponseWriter interface {
 // if the client is connected through an HTTP proxy,
 // the buffered data may not reach the client until the response
 // completes.
+// NOTE ResponseWriters必须实现这个接口，用来将buf数据发送给client
 type Flusher interface {
 	// Flush sends any buffered data to the client.
 	Flush()
@@ -287,7 +302,7 @@ type conn struct {
 	bufr *bufio.Reader
 
 	// bufw writes to checkConnErrorWriter{c}, which populates werr on error.
-	bufw *bufio.Writer
+	bufw *bufio.Writer // 该连接的写入buffer
 
 	// lastMethod is the method of the most recent request
 	// on this connection, if any.
@@ -303,6 +318,12 @@ type conn struct {
 	// hijackedv is whether this connection has been hijacked
 	// by a Handler with the Hijacker interface.
 	// It is guarded by mu.
+	// 在 Go 的 HTTP 包中，"hijack" 是一个术语，表示把一个 TCP 连接的读写权限交给 Handler 中的某个程序或库，从而实现对该连接的底层操作。
+	//
+	//当一个连接被 Hijacker 接口所实现的 Handler 劫持之后，它的读写操作就不再受 Go 的 HTTP 标准库控制了。
+	//底层的 TCP 连接传输数据时，将直接使用 Hijacker 所实现的方法，而非 HTTP 包中提供的 Read 和 Write 方法。
+	//
+	//在 HTTP 标准库中，大量的 "hijacked" 判断是为了保证在底层连接被劫持之后，HTTP 包中的其他功能仍能正常运行，比如关闭连接、设置超时等。
 	hijackedv bool
 }
 
@@ -353,7 +374,7 @@ type chunkWriter struct {
 	// at the time of res.writeHeader, if res.writeHeader is
 	// called and extra buffering is being done to calculate
 	// Content-Type and/or Content-Length.
-	header Header
+	header Header // 在调用res.writeHeader时从res.handlerHeader复制过来的
 
 	// wroteHeader tells whether the header's been written to "the
 	// wire" (or rather: w.conn.buf). this is unlike
@@ -425,7 +446,7 @@ type response struct {
 	req              *Request // request for this response
 	reqBody          io.ReadCloser
 	cancelCtx        context.CancelFunc // when ServeHTTP exits
-	wroteHeader      bool               // a non-1xx header has been (logically) written
+	wroteHeader      bool               // a non-1xx header has been (logically) written  是否已经调用过WriteHeader()写入一个非non 1xx的头部
 	wroteContinue    bool               // 100 Continue response was written
 	wants10KeepAlive bool               // HTTP/1.0 w/ Connection "keep-alive"
 	wantsClose       bool               // HTTP request has Connection "close"
@@ -443,10 +464,11 @@ type response struct {
 	w  *bufio.Writer // buffers output in chunks to chunkWriter
 	cw chunkWriter
 
-	// handlerHeader is the Header that Handlers get access to,
-	// which may be retained and mutated even after WriteHeader.
-	// handlerHeader is copied into cw.header at WriteHeader
+	// handlerheader is the header that handlers get access to,
+	// which may be retained and mutated even after writeheader.
+	// handlerheader is copied into cw.header at writeheader
 	// time, and privately mutated thereafter.
+	// handlers可以随意更改的header，在writeheader时会被复制到cw.header中，后面写入应该就是用cw.header的
 	handlerHeader Header
 	calledHeader  bool // handler accessed handlerHeader via Header
 
@@ -1103,6 +1125,8 @@ func (w *response) Header() Header {
 // well read them)
 const maxPostHandlerReadBytes = 256 << 10
 
+// 目前golang的http响应码限制条件是只要是3位数就行，但其实应该先限制到不超过599，因为600和以上的都没定义
+// 为了帮助开发者定位问题，遇到校验不过的直接panic(以前有发送http响应码为0的情况，现在不允许了，不然开发者排查问题很难)
 func checkWriteHeaderCode(code int) {
 	// Issue 22880: require valid WriteHeader status codes.
 	// For now we only enforce that it's three digits.
@@ -1138,6 +1162,8 @@ func relevantCaller() runtime.Frame {
 	return frame
 }
 
+// WriteHeader 基本逻辑：校验code是否存在，如果是100-199的code，则：将响应行写入buf->将一个默认的header写入buf->刷buf
+// 有点奇怪的，为什么100-199以外的code就没有处理呢？？？贼奇怪，都没有操作buf
 func (w *response) WriteHeader(code int) {
 	if w.conn.hijacked() {
 		caller := relevantCaller()
@@ -1536,6 +1562,7 @@ func foreachHeaderElement(v string, fn func(string)) {
 // to bw. is11 is whether the HTTP request is HTTP/1.1. false means HTTP/1.0.
 // code is the response status code.
 // scratch is an optional scratch buffer. If it has at least capacity 3, it's used.
+// 写响应行（http协议+状态码+对应说明），这里只是写入缓存区而已
 func writeStatusLine(bw *bufio.Writer, is11 bool, code int, scratch []byte) {
 	if is11 {
 		bw.WriteString("HTTP/1.1 ")
@@ -1624,13 +1651,13 @@ func (w *response) write(lenData int, dataB []byte, dataS string) (n int, err er
 		w.writeContinueMu.Unlock()
 	}
 
-	if !w.wroteHeader {
+	if !w.wroteHeader { // 请求正常处理，帮你补个header
 		w.WriteHeader(StatusOK)
 	}
 	if lenData == 0 {
 		return 0, nil
 	}
-	if !w.bodyAllowed() {
+	if !w.bodyAllowed() { // 判断该状态码是否需要body
 		return 0, ErrBodyNotAllowed
 	}
 
@@ -1639,7 +1666,7 @@ func (w *response) write(lenData int, dataB []byte, dataS string) (n int, err er
 		return 0, ErrContentLength
 	}
 	if dataB != nil {
-		return w.w.Write(dataB)
+		return w.w.Write(dataB) // tmd的，为什么还要放缓冲区呢，那别人怎么收得到剩下的内容呀
 	} else {
 		return w.w.WriteString(dataS)
 	}
@@ -2177,6 +2204,8 @@ func Redirect(w ResponseWriter, r *Request, url string, code int) {
 		// The client would probably do this for us,
 		// but doing it ourselves is more reliable.
 		// See RFC 7231, section 7.1.2
+		// 如果传入的url是相对路径或者不规则(例如直接传入aaa),需要结合Request和urlPath将其拼装成完整的path
+		// 虽然有可能客户端会帮我们做，为了保险我们还是先做一下
 		if u.Scheme == "" && u.Host == "" {
 			oldpath := r.URL.Path
 			if oldpath == "" { // should not happen, but avoid a crash if it does
@@ -2189,12 +2218,12 @@ func Redirect(w ResponseWriter, r *Request, url string, code int) {
 				olddir, _ := path.Split(oldpath)
 				url = olddir + url
 			}
-
+			// 分离query，方便后面清洁url
 			var query string
 			if i := strings.Index(url, "?"); i != -1 {
 				url, query = url[:i], url[i:]
 			}
-
+			// 清洁url但保持末尾的/
 			// clean up but preserve trailing slash
 			trailing := strings.HasSuffix(url, "/")
 			url = path.Clean(url)
@@ -2294,11 +2323,12 @@ func RedirectHandler(url string, code int) Handler {
 // ServeMux also takes care of sanitizing the URL request path and the Host
 // header, stripping the port number and redirecting any request containing . or
 // .. elements or repeated slashes to an equivalent, cleaner URL.
+// http请求复用器，m包含可以处理的请求path以及其对应的处理器信息。比较垃圾的路由吧，对于动态path没有支持
 type ServeMux struct {
 	mu    sync.RWMutex
 	m     map[string]muxEntry
-	es    []muxEntry // slice of entries sorted from longest to shortest.
-	hosts bool       // whether any patterns contain hostnames
+	es    []muxEntry // slice of entries sorted from longest to shortest. 有序的muxEntry，按len(pattern)从最大到最小，且pattern都是以/结尾的
+	hosts bool       // whether any patterns contain hostnames，以第一个字符是否为"/"来判断，!="/"则说明包含hostname
 }
 
 type muxEntry struct {
@@ -2315,6 +2345,7 @@ var DefaultServeMux = &defaultServeMux
 var defaultServeMux ServeMux
 
 // cleanPath returns the canonical path for p, eliminating . and .. elements.
+// 对path做一些修剪和完善，修剪主要是处理.和..这种相对定位符，但其实大部分场景下都不会傻逼到传入定位符叭
 func cleanPath(p string) string {
 	if p == "" {
 		return "/"
@@ -2337,6 +2368,7 @@ func cleanPath(p string) string {
 }
 
 // stripHostPort returns h without any trailing ":<port>".
+// 剥离hostname中post
 func stripHostPort(h string) string {
 	// If no port on host, return unchanged
 	if !strings.Contains(h, ":") {
@@ -2351,6 +2383,7 @@ func stripHostPort(h string) string {
 
 // Find a handler on a handler map given a path string.
 // Most-specific (longest) pattern wins.
+// 先从m准确匹配，匹配不到再从es进行模糊匹配，匹配规则是e.pattern是path的前缀，找到最长的前缀
 func (mux *ServeMux) match(path string) (h Handler, pattern string) {
 	// Check for exact match first.
 	v, ok := mux.m[path]
@@ -2372,6 +2405,7 @@ func (mux *ServeMux) match(path string) (h Handler, pattern string) {
 // This occurs when a handler for path + "/" was already registered, but
 // not for path itself. If the path needs appending to, it creates a new
 // URL, setting the path to u.Path + "/" and returning true to indicate so.
+// 如果path和host+path都没有找到handler，就看看path/和host+path/是否有handler，是就需要重定向，并对path进行修剪
 func (mux *ServeMux) redirectToPathSlash(host, path string, u *url.URL) (*url.URL, bool) {
 	mux.mu.RLock()
 	shouldRedirect := mux.shouldRedirectRLocked(host, path)
@@ -2460,6 +2494,8 @@ func (mux *ServeMux) Handler(r *Request) (h Handler, pattern string) {
 
 // handler is the main implementation of Handler.
 // The path is known to be in canonical form, except for CONNECT methods.
+// host+path匹配的优先级最高，之后是path匹配，都匹配不到就返回一个NotFoundHandler，就是404 page not found啦
+// 都不支持path带变量的，只能生硬地匹配
 func (mux *ServeMux) handler(host, path string) (h Handler, pattern string) {
 	mux.mu.RLock()
 	defer mux.mu.RUnlock()
@@ -2493,6 +2529,8 @@ func (mux *ServeMux) ServeHTTP(w ResponseWriter, r *Request) {
 
 // Handle registers the handler for the given pattern.
 // If a handler already exists for pattern, Handle panics.
+// 注册handler以及对应的pattern，逻辑蛮简单，就是加锁，然后将pattern和handler包装成一个entry加入一个map和一个slice，原生的mux确实功能比较垃
+// NOTE handle和handler，动词(handler)就是注册，名词(handler)就是匹配找到handler
 func (mux *ServeMux) Handle(pattern string, handler Handler) {
 	mux.mu.Lock()
 	defer mux.mu.Unlock()
@@ -2537,6 +2575,8 @@ func appendSorted(es []muxEntry, e muxEntry) []muxEntry {
 }
 
 // HandleFunc registers the handler function for the given pattern.
+//
+//	NOTE handle和handler，动词(handler)就是注册，名词(handler)就是匹配找到handler
 func (mux *ServeMux) HandleFunc(pattern string, handler func(ResponseWriter, *Request)) {
 	if handler == nil {
 		panic("http: nil handler")

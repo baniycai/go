@@ -5,8 +5,8 @@
 package strings_test
 
 import (
-	"bytes"
-	. "strings"
+	"std/bytes"
+	. "std/strings"
 	"testing"
 	"unicode/utf8"
 )

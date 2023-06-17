@@ -5,10 +5,10 @@
 package gzip
 
 import (
-	"bufio"
-	"bytes"
 	"io"
 	"reflect"
+	"std/bufio"
+	"std/bytes"
 	"testing"
 	"time"
 )

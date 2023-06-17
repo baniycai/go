@@ -7,11 +7,11 @@ package log
 // These tests are too simple.
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"regexp"
+	"std/bytes"
 	"strings"
 	"testing"
 	"time"

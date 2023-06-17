@@ -15,10 +15,11 @@ package path
 // It supports append, reading previously appended bytes,
 // and retrieving the final string. It does not allocate a buffer
 // to hold the output until that output diverges from s.
+// 懒加载buf，需要用到buf时才进行初始化
 type lazybuf struct {
 	s   string
 	buf []byte
-	w   int
+	w   int // 下一个要写入buf的位置，如当前buf写到下标为2的位置，则w=3
 }
 
 func (b *lazybuf) index(i int) byte {
@@ -49,7 +50,7 @@ func (b *lazybuf) string() string {
 }
 
 // Clean returns the shortest path name equivalent to path
-// by purely lexical processing. It applies the following rules
+// by purely lexical(词汇的) processing. It applies the following rules
 // iteratively until no further processing can be done:
 //
 //  1. Replace multiple slashes with a single slash.
@@ -67,6 +68,7 @@ func (b *lazybuf) string() string {
 // See also Rob Pike, “Lexical File Names in Plan 9 or
 // Getting Dot-Dot Right,”
 // https://9p.io/sys/doc/lexnames.html
+// NOTE 基本处理原则：①替换//为/；②去除.；③去除..，这里应该要弹掉前面一个目录；④替换/..为/，仅在以/..为开头时；⑤path为空字符串则直接返回.
 func Clean(path string) string {
 	if path == "" {
 		return "."
@@ -79,7 +81,7 @@ func Clean(path string) string {
 	//	reading from path; r is index of next byte to process.
 	//	writing to buf; w is index of next byte to write.
 	//	dotdot is index in buf where .. must stop, either because
-	//		it is the leading slash or it is a leading ../../.. prefix.
+	//		it is the leading slash(/) or it is a leading ../../.. prefix.
 	out := lazybuf{s: path}
 	r, dotdot := 0, 0
 	if rooted {
@@ -92,10 +94,10 @@ func Clean(path string) string {
 		case path[r] == '/':
 			// empty path element
 			r++
-		case path[r] == '.' && (r+1 == n || path[r+1] == '/'):
+		case path[r] == '.' && (r+1 == n || path[r+1] == '/'): // 去掉.(作为末尾)或./
 			// . element
 			r++
-		case path[r] == '.' && path[r+1] == '.' && (r+2 == n || path[r+2] == '/'):
+		case path[r] == '.' && path[r+1] == '.' && (r+2 == n || path[r+2] == '/'): // 去掉..(作为末尾)或../
 			// .. element: remove to last /
 			r += 2
 			switch {
@@ -159,6 +161,7 @@ func Split(path string) (dir, file string) {
 // The result is Cleaned. However, if the argument list is
 // empty or all its elements are empty, Join returns
 // an empty string.
+// NOTE 将elem拼接起来，以/分隔，忽略空字符，最后调用Clean方法对 .或..或//这种特殊场景进行处理，简化final path
 func Join(elem ...string) string {
 	size := 0
 	for _, e := range elem {
@@ -167,16 +170,16 @@ func Join(elem ...string) string {
 	if size == 0 {
 		return ""
 	}
-	buf := make([]byte, 0, size+len(elem)-1)
+	buf := make([]byte, 0, size+len(elem)-1) // 提前申请好，避免运行时重分配带来的复制的开销了；长度为len(elem...)+n个'/'
 	for _, e := range elem {
-		if len(buf) > 0 || e != "" {
+		if len(buf) > 0 || e != "" { // 忽略空字符
 			if len(buf) > 0 {
 				buf = append(buf, '/')
 			}
-			buf = append(buf, e...)
+			buf = append(buf, e...) // 最终基本格式是：/x/y/z
 		}
 	}
-	return Clean(string(buf))
+	return Clean(string(buf)) // NOTE 进一步整理。为什么不直接拼接path，而要调用Join，大部分就是因为这个方法
 }
 
 // Ext returns the file name extension used by path.

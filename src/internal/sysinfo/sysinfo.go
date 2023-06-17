@@ -7,7 +7,7 @@
 package sysinfo
 
 import (
-	internalcpu "internal/cpu"
+	internalcpu "std/internal/cpu"
 	"sync"
 )
 
