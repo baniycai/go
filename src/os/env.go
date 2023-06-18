@@ -98,6 +98,7 @@ func getShellName(s string) (string, int) {
 // Getenv retrieves the value of the environment variable named by the key.
 // It returns the value, which will be empty if the variable is not present.
 // To distinguish between an empty value and an unset value, use LookupEnv.
+// 获取环境变量，没有就返回""；但也有可能是设置的值就是""，想区分的话，最好使用LookupEnv
 func Getenv(key string) string {
 	testlog.Getenv(key)
 	v, _ := syscall.Getenv(key)

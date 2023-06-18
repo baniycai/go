@@ -21,11 +21,13 @@ var (
 	envLock sync.RWMutex
 
 	// env maps from an environment variable to its first occurrence in envs.
-	env map[string]int
+	env map[string]int // 存放的是key:index的格式，index是其在envs中的idx
 
 	// envs is provided by the runtime. elements are expected to
 	// be of the form "key=value". An empty string means deleted
 	// (or a duplicate to be ignored).
+
+	// 运行时提供的环境变量，存放的是key=val的格式
 	envs []string = runtime_envs()
 )
 
@@ -38,18 +40,18 @@ func unsetenv_c(k string)
 
 func copyenv() {
 	env = make(map[string]int)
-	for i, s := range envs {
+	for i, s := range envs { // 遍历运行时提供的环境变量[]string
 		for j := 0; j < len(s); j++ {
 			if s[j] == '=' {
 				key := s[:j]
-				if _, ok := env[key]; !ok {
+				if _, ok := env[key]; !ok { // 切割得到map[key]index
 					env[key] = i // first mention of key
 				} else {
 					// Clear duplicate keys. This permits Unsetenv to
 					// safely delete only the first item without
 					// worrying about unshadowing a later one,
 					// which might be a security problem.
-					envs[i] = ""
+					envs[i] = "" // 存在重复的key，则将val置空
 				}
 				break
 			}
@@ -80,14 +82,14 @@ func Getenv(key string) (value string, found bool) {
 	envLock.RLock()
 	defer envLock.RUnlock()
 
-	i, ok := env[key]
+	i, ok := env[key] // 找索引
 	if !ok {
 		return "", false
 	}
-	s := envs[i]
+	s := envs[i] // 找key=val串
 	for i := 0; i < len(s); i++ {
 		if s[i] == '=' {
-			return s[i+1:], true
+			return s[i+1:], true // 切割得到val
 		}
 	}
 	return "", false

@@ -7,9 +7,9 @@ package runtime
 // This file contains the implementation of Go select statements.
 
 import (
-	"internal/abi"
-	"runtime/internal/atomic"
-	"unsafe"
+	"std/internal/abi"
+	"std/runtime/internal/atomic"
+	"std/unsafe"
 )
 
 const debugSelect = false

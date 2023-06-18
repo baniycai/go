@@ -15,10 +15,10 @@
 package exec_test
 
 import (
-	"os"
-	"sync"
-	"syscall"
-	"time"
+	"std/os"
+	"std/sync"
+	"std/syscall"
+	"std/time"
 )
 
 func init() {

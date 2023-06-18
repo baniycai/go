@@ -198,6 +198,8 @@ func epipecheck(file *File, e error) {
 
 // DevNull is the name of the operating system's “null device.”
 // On Unix-like systems, it is "/dev/null"; on Windows, "NUL".
+// 在UNIX和类UNIX操作系统中，/dev/null是一个特殊的设备文件，也称为“无底洞”，通过该文件发送到其中的所有数据都将被丢弃，而不进行任何处理或保存。
+// 它通常用于将输出重定向到空处，以便静默地丢弃不需要的输出或错误信息，或者用作黑洞程序的输入源，即读取/dev/null的程序将立即返回EOF（文件结束标志）并退出。
 const DevNull = "/dev/null"
 
 // openFileNolog is the Unix implementation of OpenFile.

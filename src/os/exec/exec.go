@@ -88,21 +88,70 @@
 // Before adding such overrides, make sure you understand the
 // security implications of doing so.
 // See https://go.dev/blog/path-security for more information.
+// 包exec运行外部命令。它包装了os.StartProcess以便更容易地重新映射标准输入和输出，连接I/O管道并进行其他调整。
+// note 与C和其他语言中的“system”库调用不同，os/exec包有意不调用系统shell，并且不会扩展任何glob模式或处理其他扩展、管道或重定向，这些通常是由shell完成的。(不会自己扩展，需要的话直接调用Glob函数来扩展)
+// note 该包的行为更像C的“exec”函数族。要扩展glob模式，请直接调用shell，并小心转义任何危险的输入，或者使用path/filepath包的Glob函数。要扩展环境变量，请使用包os的ExpandEnv。
+//
+// 请注意，此包中的示例假定Unix系统。它们可能无法在Windows上运行，并且它们不在golang.org和godoc.org使用的Go Playground中运行。
+// 当前目录中的可执行文件
+// 函数Command和LookPath在当前路径列出的目录中查找程序，遵循主机操作系统的惯例。几十年来，操作系统一直将当前目录包含在这个搜索中，有时隐式地包含，有时则通过默认配置明确指定。
+// 现代实践是，通常不希望包括当前目录，而且经常会导致安全问题。
+// note (不会使用当前目录的程序，防止出问题)为了避免这些安全问题，在Go 1.19中，此包将不会使用相对于当前目录的隐式或显式路径条目来解析程序。也就是说，如果您运行exec.LookPath("go")，则无论路径如何配置，它都不会成功返回Unix上的./go或Windows上的.\go.exe。
+// 相反，如果通常的路径算法会导致这个答案，这些函数将返回一个满足errors.Is(err, ErrDot)的错误err。
+// 例如，请考虑这两个程序片段：
+//
+//	path, err := exec.LookPath("prog")
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	use(path)
+//
+// 和
+//
+//	cmd := exec.Command("prog")
+//	if err := cmd.Run(); err != nil {
+//		log.Fatal(err)
+//	}
+//
+// 无论当前路径如何配置，它们都不会找到并运行./prog或.\prog.exe。
+// note 总是想从当前目录运行程序的代码可以被重写为"./prog"而不是"prog"。
+// 坚持包括相对路径条目结果的代码可以使用errors.Is检查来覆盖错误：
+//
+//	path, err := exec.LookPath("prog")
+//	if errors.Is(err, exec.ErrDot) {
+//		err = nil
+//	}
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	use(path)
+//
+// 和
+//
+//	cmd := exec.Command("prog")
+//	if errors.Is(cmd.Err, exec.ErrDot) {
+//		cmd.Err = nil
+//	}
+//	if err := cmd.Run(); err != nil {
+//		log.Fatal(err)
+//	}
+//
+// note 设置环境变量GODEBUG=execerrdot=0可以完全禁用ErrDot的生成，暂时恢复无法应用更有针对性的修复措施的程序的Go 1.19之前的行为。未来版本的Go可能会删除此变量的支持。
 package exec
 
 import (
 	"bytes"
 	"context"
 	"errors"
-	"internal/syscall/execenv"
-	"io"
-	"os"
 	"path/filepath"
-	"runtime"
+	"std/internal/syscall/execenv"
+	"std/io"
+	"std/os"
+	"std/runtime"
+	"std/sync"
+	"std/syscall"
 	"strconv"
 	"strings"
-	"sync"
-	"syscall"
 )
 
 // Error is returned by LookPath when it fails to classify a file as an
@@ -144,13 +193,13 @@ type Cmd struct {
 	// This is the only field that must be set to a non-zero
 	// value. If Path is relative, it is evaluated relative
 	// to Dir.
-	Path string
+	Path string // 可执行文件的完整路径
 
 	// Args holds command line arguments, including the command as Args[0].
 	// If the Args field is empty or nil, Run uses {Path}.
 	//
 	// In typical use, both Path and Args are set by calling Command.
-	Args []string
+	Args []string // 操作，Args[0]为可执行文件的name，比如echo
 
 	// Env specifies the environment of the process.
 	// Each entry is of the form "key=value".
@@ -268,13 +317,22 @@ type Cmd struct {
 // unquoting algorithm. In these or other similar cases, you can do the
 // quoting yourself and provide the full command line in SysProcAttr.CmdLine,
 // leaving Args empty.
+// 该命令返回一个Cmd结构体，以执行指定参数的程序。
+// 它只设置返回结构中的Path和Args字段。
+// 如果name不包含路径分隔符，则Command使用LookPath将其解析为完整路径（如果可能）。否则直接使用name作为Path。
+// 返回的Cmd的Args字段由命令名和arg的元素构成，因此arg不应包括命令名称本身。例如，Command("echo", "hello")。
+// Args [0]始终是name，而不是可能已解析的Path。
+// 在Windows上，进程会收到整个命令行作为单个字符串，并进行自己的解析。
+// Command将Args组合并引用为与使用CommandLineToArgvW（最常见的方法）的应用程序兼容的命令行字符串。
+// 值得注意的例外情况是msiexec.exe和cmd.exe（因此所有批处理文件），它们具有不同的去引号算法。
+// 在这些或其他类似情况下，您可以自己引用并在SysProcAttr.CmdLine中提供完整的命令行，使Args为空。
 func Command(name string, arg ...string) *Cmd {
 	cmd := &Cmd{
 		Path: name,
 		Args: append([]string{name}, arg...),
 	}
 	if filepath.Base(name) == name {
-		lp, err := LookPath(name)
+		lp, err := LookPath(name) // 直接查找可执行文件的完整路径
 		if lp != "" {
 			// Update cmd.Path even if err is non-nil.
 			// If err is ErrDot (especially on Windows), lp may include a resolved
@@ -469,6 +527,9 @@ func lookExtensions(path, dir string) (string, error) {
 //
 // After a successful call to Start the Wait method must be called in
 // order to release associated system resources.
+// Start会启动指定的命令但不会等待其完成。
+// 如果Start成功返回，c.Process字段将被设置。
+// 在成功调用Start之后，必须调用Wait方法以释放相关的系统资源
 func (c *Cmd) Start() error {
 	if c.Path == "" && c.Err == nil && c.lookPathErr == nil {
 		c.Err = errors.New("exec: no command")
@@ -516,7 +577,7 @@ func (c *Cmd) Start() error {
 	}
 	c.childFiles = append(c.childFiles, c.ExtraFiles...)
 
-	env, err := c.environ()
+	env, err := c.environ() // 取环境变量
 	if err != nil {
 		return err
 	}
@@ -589,6 +650,12 @@ func (e *ExitError) Error() string {
 // for the respective I/O loop copying to or from the process to complete.
 //
 // Wait releases any resources associated with the Cmd.
+// Wait 等待命令退出，等待从标准输入复制或从标准输出或标准错误输出完成。
+// 该命令必须已经被 Start 启动。
+// 如果命令运行正常，没有在复制标准输入、标准输出和标准错误输出时出现问题，并以零状态退出，则返回的错误为 nil。
+// 如果命令无法运行或未能成功完成，错误类型为 *ExitError。其他错误类型可能会因为 I/O 问题而返回。
+// 如果 c.Stdin、c.Stdout 或 c.Stderr 中有任何一个不是 *os.File，Wait 还会等待分别与进程进行 I/O 循环处理的复制过程完成。
+// Wait 释放与 Cmd 相关联的所有资源。
 func (c *Cmd) Wait() error {
 	if c.Process == nil {
 		return errors.New("exec: not started")
@@ -878,14 +945,16 @@ func minInt(a, b int) int {
 // environ returns a best-effort copy of the environment in which the command
 // would be run as it is currently configured. If an error occurs in computing
 // the environment, it is returned alongside the best-effort copy.
+// environ函数会尽力返回 一个当前配置下，指定命令将要在其中运行的 环境的副本。
+// 如果在计算过程中发生错误，则除了最佳努力拷贝之外，还会返回该错误信息。
 func (c *Cmd) environ() ([]string, error) {
 	var err error
 
 	env := c.Env
 	if env == nil {
-		env, err = execenv.Default(c.SysProcAttr)
+		env, err = execenv.Default(c.SysProcAttr) // 拷贝一份环境变量
 		if err != nil {
-			env = os.Environ()
+			env = os.Environ() // 再尝试一次
 			// Note that the non-nil err is preserved despite env being overridden.
 		}
 

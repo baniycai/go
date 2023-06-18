@@ -7,8 +7,8 @@
 package runtime
 
 import (
-	"runtime/internal/atomic"
-	"unsafe"
+	"std/runtime/internal/atomic"
+	"std/unsafe"
 )
 
 type mstats struct {

@@ -33,6 +33,16 @@ const (
 	throwTypeRuntime
 )
 
+// 我们有两种不同的延迟处理方式。较早的方法涉及在执行延迟语句时创建一个延迟记录，并将其添加到延迟链中。
+//在所有函数退出时，deferreturn 调用会检查这个链以运行适当的 defer 调用。在循环中没有出现 defer 语句的函数中，
+//我们使用一种更便宜的方法（称为 open-coded defers）。在这种情况下，我们只需将延迟函数/参数信息存储到每个
+//延迟语句点的特定栈槽中，同时将位图中的位设置为 1。在每次函数退出时，我们会添加内联代码，
+//根据存储在堆栈上的位图和 fn/arg 信息直接进行适当的 defer 调用。在 panic/Goexit 处理期间，
+//使用额外的 funcdata 信息来指示包含位图和 defer fn/args 的确切栈槽位置，从而进行相应的 defer 调用。
+//
+//检查确保我们真的能够生成 panic。如果 panic 是从 runtime 或 malloc 内部生成的，则转换为 msg 的 throw。
+//pc 应该是触发此 panic 的编译器生成代码的程序计数器。
+
 // We have two different ways of doing defers. The older way involves creating a
 // defer record at the time that a defer statement is executing and adding it to a
 // defer chain. This chain is inspected by the deferreturn call at all function

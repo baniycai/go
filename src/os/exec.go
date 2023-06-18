@@ -104,6 +104,11 @@ func FindProcess(pid int) (*Process, error) {
 // higher-level interfaces.
 //
 // If there is an error, it will be of type *PathError.
+// StartProcess使用由name、argv和attr指定的程序、参数和属性 note 启动一个新进程。
+// argv切片将成为新进程中的os.Args，因此通常以程序名称开头。
+// 如果调用goroutine使用runtime.LockOSThread锁定了操作系统线程并修改了任何可继承的操作系统级线程状态（例如Linux或Plan 9名称空间），则新进程将继承调用者的线程状态。
+// StartProcess是一个低级接口。os/exec包提供了更高级别的接口。
+// 如果有错误，它将是*PathError类型。
 func StartProcess(name string, argv []string, attr *ProcAttr) (*Process, error) {
 	testlog.Open(name)
 	return startProcess(name, argv, attr)

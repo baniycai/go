@@ -5,10 +5,10 @@
 package runtime
 
 import (
-	"internal/abi"
-	"internal/bytealg"
-	"internal/goarch"
-	"unsafe"
+	"std/internal/abi"
+	"std/internal/bytealg"
+	"std/internal/goarch"
+	"std/unsafe"
 )
 
 // The constant is known to the compiler.
@@ -269,12 +269,16 @@ func intstring(buf *[4]byte, v int64) (s string) {
 // string and byte slice both refer to the same storage.
 // The storage is not zeroed. Callers should use
 // b to set the string contents and then drop b.
-func rawstring(size int) (s string, b []byte) {
-	p := mallocgc(uintptr(size), nil, false)
 
+// 为一个新的string分配空间；返回的string和byte slice都引用了同一个空间，存储空间没有归零
+// 调用者必须使用b来设置string的内容，并丢弃b
+func rawstring(size int) (s string, b []byte) {
+	p := mallocgc(uintptr(size), nil, false) // 先分配空间，没有指定类型
+
+	// 搞一个新的stringStruct
 	stringStructOf(&s).str = p
 	stringStructOf(&s).len = size
-
+	// 将b先转成unsafe.Pointer，再强转成*slice，再搞一个slice来初始化，有点小离谱...现在b存放的应该是一个slice
 	*(*slice)(unsafe.Pointer(&b)) = slice{p, size, size}
 
 	return

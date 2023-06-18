@@ -1252,6 +1252,11 @@ func profilealloc(mp *m, x unsafe.Pointer, size uintptr) {
 	mProf_Malloc(x, size)
 }
 
+// nextSample 返回用于堆分析的下一个采样点。目标是平均每 MemProfileRate 字节对分配进行采样，
+// 但在分配时间线上具有完全随机的分布；这对应于参数为 MemProfileRate 的泊松过程。
+// 在泊松过程中，两个采样点之间的距离遵循指数分布 (exp(MemProfileRate))，
+// 因此最佳返回值是从平均值为 MemProfileRate 的指数分布中取出的随机数字。
+
 // nextSample returns the next sampling point for heap profiling. The goal is
 // to sample allocations on average every MemProfileRate bytes, but with a
 // completely random distribution over the allocation timeline; this

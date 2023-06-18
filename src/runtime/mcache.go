@@ -5,9 +5,12 @@
 package runtime
 
 import (
-	"runtime/internal/atomic"
+	"std/runtime/internal/atomic"
 	"unsafe"
 )
+
+// note 每个协程独有的cache，用来存放小对象和本地分配状态。独有的，所以不存在协程安全问题，不需要🔐
+// 这些cache不是从gc管理的内存中分配出来的，所以这些堆指针必须被特别处理(不确定?)
 
 // Per-thread (in Go, per-P) cache for small objects.
 // This includes a small object cache and local allocation stats.
@@ -53,7 +56,7 @@ type mcache struct {
 }
 
 // A gclink is a node in a linked list of blocks, like mlink,
-// but it is opaque to the garbage collector.
+// but it is opaque(不透明) to the garbage collector.
 // The GC does not trace the pointers during collection,
 // and the compiler does not emit write barriers for assignments
 // of gclinkptr values. Code should store references to gclinks
@@ -83,7 +86,7 @@ var emptymspan mspan
 
 func allocmcache() *mcache {
 	var c *mcache
-	systemstack(func() {
+	systemstack(func() { // note 在系统栈上运行函数；加锁，分配，解锁，一气呵成！
 		lock(&mheap_.lock)
 		c = (*mcache)(mheap_.cachealloc.alloc())
 		c.flushGen = mheap_.sweepgen
