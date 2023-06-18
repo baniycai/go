@@ -35,6 +35,24 @@
 // ResetSession is called if implemented. If a connection is never returned to the
 // connection pool but immediately reused, then ResetSession is called prior to
 // reuse but IsValid is not called.
+// note Package driver 定义了数据库驱动所需实现的接口，被 package sql 使用。
+// 大多数代码应该使用 package sql。
+// 驱动程序接口已经发生了演变。驱动程序应该实现 Connector 和 DriverContext 接口。
+// Connector.Connect 和 Driver.Open 方法不应返回 ErrBadConn。
+// 仅当连接已经处于无效状态（例如关闭）时，Validator、SessionResetter 或查询方法才应返回 ErrBadConn。
+//
+// 所有 Conn 实现都应实现以下接口：
+// Pinger、SessionResetter 和 Validator。
+//
+// 如果支持命名参数或上下文，则驱动程序的 Conn 应实现：
+// ExecerContext、QueryerContext、ConnPrepareContext 和 ConnBeginTx。
+//
+// 为了支持自定义数据类型，请实现 NamedValueChecker。NamedValueChecker 还允许查询接受每个查询选项作为参数，方法是从 CheckNamedValue 返回 ErrRemoveArgument。
+//
+// 如果支持多个结果集，则 Rows 应实现 RowsNextResultSet。如果驱动程序知道返回结果中存在的类型，并且能够描述它们，则应实现以下接口：
+// RowsColumnTypeScanType、RowsColumnTypeDatabaseTypeName、RowsColumnTypeLength、RowsColumnTypeNullable 和 RowsColumnTypePrecisionScale。给定的行值还可以返回 Rows 类型，它可以表示数据库游标值。
+//
+// 在将连接返回到连接池之前，如果实现了 IsValid，则会调用它。如果实现了 ResetSession，则在将连接重新用于另一个查询之前会调用它。如果连接永远不会返回到连接池而立即被重用，则在重用之前调用 ResetSession，但不会调用 IsValid。
 package driver
 
 import (

@@ -5,9 +5,9 @@
 package embed_test
 
 import (
-	"embed"
 	"log"
-	"net/http"
+	"std/embed"
+	"std/net/http"
 )
 
 //go:embed internal/embedtest/testdata/*.txt

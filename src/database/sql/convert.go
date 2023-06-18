@@ -104,6 +104,7 @@ func defaultCheckNamedValue(nv *driver.NamedValue) (err error) {
 // The statement ds may be nil, if no statement is available.
 //
 // ci must be locked.
+// 将query的args转化成driver Values
 func driverArgsConnLocked(ci driver.Conn, ds *driverStmt, args []any) ([]driver.NamedValue, error) {
 	nvargs := make([]driver.NamedValue, len(args))
 
@@ -216,6 +217,8 @@ func convertAssign(dest, src any) error {
 // dest should be a pointer type. If rows is passed in, the rows will
 // be used as the parent for any cursor values converted from a
 // driver.Rows to a *Rows.
+// 将src的值copy到dest，dest必须是一个指针类型；如果src是driver.Rows类型，则会使用rows来完善dest的值
+// 例如src是int，dest是*string，则会将int转string再赋值给dest
 func convertAssignRows(dest, src any, rows *Rows) error {
 	// Common cases, without reflect.
 	switch s := src.(type) {

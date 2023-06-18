@@ -7,7 +7,7 @@ package driver
 import (
 	"fmt"
 	"reflect"
-	"strconv"
+	"std/strconv"
 	"time"
 )
 
@@ -27,9 +27,15 @@ import (
 //
 //   - by the sql package, for converting from a driver's Value type
 //     to a user's type in a scan.
+//
+// ValueConverter 是提供 ConvertValue 方法的接口。
+// driver 包提供了各种 ValueConverter 的实现，以提供在驱动程序之间进行转换的一致实现。note ValueConverter 有几个用途：
+// - 将 sql 包提供的 Value 类型从一个特定的数据库表列类型转换为并确保它合适，例如确保一个特定的 int64 可以适应一个表的 uint16 列。
+// - 将从数据库中获取的值转换为驱动程序 Value 类型之一。
+// - 在 sql 包中，将从驱动程序的 Value 类型转换为用户扫描中的类型时使用。
 type ValueConverter interface {
 	// ConvertValue converts a value to a driver Value.
-	ConvertValue(v any) (Value, error)
+	ConvertValue(v any) (Value, error) // note 用来将any，即各种类型的值转化为一种类型的值，比如bool、int32、string等等，主要实现有boolType、int32Type、stringType
 }
 
 // Valuer is the interface providing the Value method.
@@ -108,7 +114,7 @@ var _ ValueConverter = int32Type{}
 func (int32Type) ConvertValue(v any) (Value, error) {
 	rv := reflect.ValueOf(v)
 	switch rv.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64: // 一个一个case应该也可以，这个估计是为了代码更精简，才用了反射
 		i64 := rv.Int()
 		if i64 > (1<<31)-1 || i64 < -(1<<31) {
 			return nil, fmt.Errorf("sql/driver: value %d overflows int32", v)

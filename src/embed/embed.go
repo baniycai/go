@@ -126,6 +126,63 @@
 // To support tools that analyze Go packages, the patterns found in //go:embed lines
 // are available in “go list” output. See the EmbedPatterns, TestEmbedPatterns,
 // and XTestEmbedPatterns fields in the “go help list” output.
+// 包embed提供访问在运行Go程序中嵌入的文件的功能。
+// note 导入“embed”的Go源文件可以使用//go：embed指令，在编译时从包目录或子目录读取文件的内容，初始化一个字符串、[]byte或FS类型的变量。
+// note 例如，以下是三种将名为hello.txt的文件嵌入代码并在运行时打印其内容的方法：
+// 将一个文件嵌入字符串：
+// import _ "embed"
+// //go:embed hello.txt
+// var s string
+// print(s)
+// 将一个文件嵌入字节切片：
+// import _ "embed"
+// //go:embed hello.txt
+// var b []byte
+// print(string(b))
+// 将一个或多个文件嵌入文件系统：
+// import "embed"
+// //go:embed hello.txt
+// var f embed.FS
+// data，_ := f.ReadFile("hello.txt")
+// print(string(data))
+// # 指令
+// note 一个//go：embed指令在变量声明之前指定要嵌入哪些文件，使用一个或多个path.Match模式。
+// 该指令必须紧接着单个变量声明的行出现。在指令和声明之间只允许空行和'//'行注释。
+// note 变量的类型必须是字符串类型、字节类型的切片或FS（或FS的别名）。
+// 例如：
+// package server
+// import "embed"
+// // content holds our static web server content.
+// //go:embed image/* template/*
+// //go:embed html/index.html
+// var content embed.FS
+//
+// note Go构建系统会识别指令，并安排以从文件系统中匹配文件来填充声明的变量（在上面的示例中为content）。
+// //go：embed指令接受多个以空格分隔的模式，以缩短代码，但它也可以重复出现，从而避免当有许多模式时出现非常长的行。
+// 这些模式相对于包含源文件的包目录进行解释。路径分隔符是斜杠，即使在Windows系统上也是如此。模式不能包含'.'或'..'或空路径元素，也不能以斜杠开头或结尾。
+// 要匹配当前目录中的所有内容，请使用'*'代替'.'。为了允许以其名称中包含空格的文件命名，模式可以写成Go双引号或反引号字符串字面值。
+// 如果模式命名一个目录，则嵌入该目录根节点下的所有文件（递归），但以'.'或'_'开头的文件将被排除。因此，上面示例中的变量与以下变量几乎相同：
+// // content is our static web server content.
+// //go:embed image template html/index.html
+// var content embed.FS
+// 区别是'image/*'嵌入'image/.tempfile'，而'image'则不会嵌入。两者都不嵌入'image/dir/.tempfile'。
+// 如果模式以前缀'all:'开头，则更改遍历目录的规则，以包括以'.'或'_'开头的文件。例如，'all:image'将嵌入'image/.tempfile'和'image/dir/.tempfile'。
+// note //go：embed指令可用于导出和未导出的变量，具体取决于包是否希望向其他包公开数据。它只能用于包范围内的变量，不能用于局部变量。
+// note 模式不得匹配超出包模块的文件，如“.git/*”或符号链接。模式不得匹配包含特殊标点符号“* < >？`' |/ \和：的文件名。空目录的匹配被忽略。之后，在//go：embed行中的每个模式都必须至少匹配一个文件或非空目录。
+// 如果任何模式无效或匹配无效，则构建将失败。
+// # 字符串和字节
+// note 对于类型为字符串或[]byte的变量的, go:embed行只能有一个模式，而且该模式只能匹配一个文件。该字符串或[]byte将用该文件的内容初始化。
+// note //go：embed指令要求导入“embed”，即使使用字符串或[]byte也是如此。在不引用embed.FS的源文件中，使用空白导入（import _ "embed"）。
+// 对于嵌入单个文件，类型为字符串或[]byte的变量通常最好。FS类型允许嵌入文件树，例如静态Web服务器内容的目录，就像上面的示例一样。
+// note FS实现了io/fs包的FS接口，因此它可以与任何理解文件系统的包一起使用，包括net/http、text/template和html/template。
+// 例如，给定上面示例中的content变量，我们可以编写：
+// http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(content))))
+// template.ParseFS(content, "*.tmpl")
+// # 工具
+// 为了支持分析Go包的工具，在“go list”输出中找到的//go：embed行中的模式可用。“go help list”输出中的EmbedPatterns、TestEmbedPatterns和XTestEmbedPatterns字段。
+// 这些字段包含有关模式的信息，例如哪些文件将被嵌入程序中。
+// 总之，embed包提供了一种方便的方式，使开发人员能够将文件嵌入Go程序中，并在运行时访问它们。这对于需要静态资源的程序非常有用，如Web服务器或CLI工具。
+// 但是，请注意遵循指令的规则和限制，以确保您的程序可以编译和运行。
 package embed
 
 import (
