@@ -2,19 +2,26 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// note RFC指的是 请求意见稿，又翻译作意见征求，意见请求（Request for Comments），它是一系列由互联网工程任务组（IETF）发布的文件，用于定义互联网协议和相关技术标准。
+//RFC最初是为了促进互联网工程社区之间的合作和交流而创建的，其中包括网络设计、实现、测试和评估等方面的主题。
+//RFC文档通常以英语编写，并经过全球网络工程师的审查和讨论，被认为是互联网标准的基础。
+//今天，RFC已成为一个广泛使用的术语，不仅限于互联网领域，还用于其他技术和行业的标准化文件。
+
 /*
 Package mail implements parsing of mail messages.
 
 For the most part, this package follows the syntax as specified by RFC 5322 and
 extended by RFC 6532.
 Notable divergences:
-  - Obsolete address formats are not parsed, including addresses with
+  - Obsolete（过时的） address formats are not parsed, including addresses with
     embedded route information.
   - The full range of spacing (the CFWS syntax element) is not supported,
     such as breaking addresses across lines.
   - No unicode normalization is performed.
   - The special characters ()[]:;@\, are allowed to appear unquoted in names.
 */
+
+// note 该包是用来解析email消息的
 package mail
 
 import (

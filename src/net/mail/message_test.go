@@ -8,7 +8,7 @@ import (
 	"bytes"
 	"io"
 	"mime"
-	"reflect"
+	"std/reflect"
 	"strings"
 	"testing"
 	"time"

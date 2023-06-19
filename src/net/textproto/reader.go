@@ -589,8 +589,12 @@ func (r *Reader) upcomingHeaderNewlines() (n int) {
 // MIME header keys are assumed to be ASCII only.
 // If s contains a space or invalid header field bytes, it is
 // returned without modifications.
+// CanonicalMIMEHeaderKey 返回 MIME 标头键的规范格式。
+// note 规范化将第一个字母和连字符后面的任何字母转换为大写；其余的都转换为小写。
+// 例如，“accept-encoding”的规范键是“Accept-Encoding”。假定 MIME 标头键仅为 ASCII。
+// 如果 s 包含空格或无效的标头字段字节，则不加修改地返回
 func CanonicalMIMEHeaderKey(s string) string {
-	// Quick check for canonical encoding.
+	// Quick check for canonical(典范) encoding.
 	upper := true
 	for i := 0; i < len(s); i++ {
 		c := s[i]
