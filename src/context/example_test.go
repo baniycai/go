@@ -5,8 +5,8 @@
 package context_test
 
 import (
-	"context"
 	"fmt"
+	"std/context"
 	"time"
 )
 

@@ -45,11 +45,33 @@
 //
 // See https://blog.golang.org/context for example code for a server that uses
 // Contexts.
+// 2023/6/18 17:44:25
+//
+// note 包 context 定义了 Context 类型，它在 API 边界和进程之间传递截止时间、取消信号和其他请求范围的值。
+//
+// note 服务器收到的请求应该创建一个 Context，对服务器的调用应该接受一个 Context。
+// 它们之间的函数调用链必须传播 Context，可选择使用 WithCancel、WithDeadline、WithTimeout 或 WithValue 创建的派生 Context 替换它。
+// note 当 Context 被取消时，所有由它派生的 Context 也将被取消。（上级会影响到下级，但是上级不会影响到上级）
+//
+// WithCancel、WithDeadline 和 WithTimeout 函数接收一个 Context（父级）并返回派生的 Context（子级）和 CancelFunc。
+// note 调用 CancelFunc 取消子级及其子级，删除父级对子级的引用，并停止任何相关计时器。如果没有调用 CancelFunc，则会泄漏子级及其子级，直到父级被取消或计时器触发。
+// go vet 工具检查是否在所有控制流路径上使用了 CancelFuncs。
+//
+// 使用 Context 的程序应遵循以下规则，以使接口在各个包之间保持一致，并使静态分析工具检查上下文传播：
+// note 不要将 Context 存储在结构类型内部；而是显式地将 Context 传递给每个需要它的函数。Context 应该是第一个参数，通常命名为 ctx：
+//
+//	func DoSomething(ctx context.Context, arg Arg) error {
+//	   // ... use ctx ...
+//	}
+//
+// note 即使函数允许，也不要传递空的 Context。如果不确定要使用哪个 Context，请传递 context.TODO。
+// 仅将上下文值用于跨进程和 API 传输的请求范围数据，而不是将可选参数传递给函数。
+// 同一个 Context 可以传递给运行在不同 goroutine 中的函数；Context 在多个 goroutine 中同时使用是安全的。
 package context
 
 import (
 	"errors"
-	"internal/reflectlite"
+	"std/internal/reflectlite"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -197,6 +219,7 @@ func (e *emptyCtx) String() string {
 }
 
 var (
+	// note background和todo就是两个空的ctx，啥功能都没有
 	background = new(emptyCtx)
 	todo       = new(emptyCtx)
 )
@@ -229,6 +252,9 @@ type CancelFunc func()
 //
 // Canceling this context releases resources associated with it, so code should
 // call cancel as soon as the operations running in this Context complete.
+// WithCancel 返回一个带有新 Done 通道的父级副本。
+// note 当调用返回的 cancel 函数或者父级上下文的 Done 通道关闭时，返回的上下文的 Done 通道也会被关闭，以先发生者为准。
+// note 取消此上下文会释放与其关联的资源，因此代码应在此上下文中运行的操作完成后尽快调用 cancel。
 func WithCancel(parent Context) (ctx Context, cancel CancelFunc) {
 	if parent == nil {
 		panic("cannot create context from nil parent")
@@ -247,14 +273,15 @@ func newCancelCtx(parent Context) cancelCtx {
 var goroutines int32
 
 // propagateCancel arranges for child to be canceled when parent is.
+// 传播cancel，应该是传播父的cancel叭
 func propagateCancel(parent Context, child canceler) {
-	done := parent.Done()
+	done := parent.Done() // note 父没取消
 	if done == nil {
 		return // parent is never canceled
 	}
 
 	select {
-	case <-done:
+	case <-done: // note 父取消，子也要取消
 		// parent is already canceled
 		child.cancel(false, parent.Err())
 		return
@@ -275,7 +302,7 @@ func propagateCancel(parent Context, child canceler) {
 		p.mu.Unlock()
 	} else {
 		atomic.AddInt32(&goroutines, +1)
-		go func() {
+		go func() { // note 父还没取消，则新建一个协程，等待父取消后把子也取消了，或者是子自己取消了
 			select {
 			case <-parent.Done():
 				child.cancel(false, parent.Err())
@@ -294,6 +321,10 @@ var cancelCtxKey int
 // parent.Done() matches that *cancelCtx. (If not, the *cancelCtx
 // has been wrapped in a custom implementation providing a
 // different done channel, in which case we should not bypass it.)
+// note parentCancelCtx返回父级的基础cancelCtx。
+// 它通过查找parent.Value(&cancelCtxKey)来 note 查找最内层的封闭cancelCtx，
+// 然后检查parent.Done()是否与该cancelCtx匹配来实现此操作。
+// （如果不是，则cancelCtx已被包装在提供不同完成通道的自定义实现中，在这种情况下，我们不应绕过它。）
 func parentCancelCtx(parent Context) (*cancelCtx, bool) {
 	done := parent.Done()
 	if done == closedchan || done == nil {
@@ -342,7 +373,8 @@ func init() {
 type cancelCtx struct {
 	Context
 
-	mu       sync.Mutex            // protects following fields
+	mu sync.Mutex // protects following fields
+	// note 存放chan struct{}，这个chan不会放元素，只会在定时器到期或者手动调用了cancel()时进行close，这样调用Done()的时候就能从中取到元素啦
 	done     atomic.Value          // of chan struct{}, created lazily, closed by first cancel call
 	children map[canceler]struct{} // set to nil by the first cancel call
 	err      error                 // set to non-nil by the first cancel call
@@ -355,6 +387,7 @@ func (c *cancelCtx) Value(key any) any {
 	return value(c.Context, key)
 }
 
+// 加载done，其采用懒加载的方式
 func (c *cancelCtx) Done() <-chan struct{} {
 	d := c.done.Load()
 	if d != nil {
@@ -394,6 +427,7 @@ func (c *cancelCtx) String() string {
 
 // cancel closes c.done, cancels each of c's children, and, if
 // removeFromParent is true, removes c from its parent's children.
+// note 关闭c.done，并调用每个children的cancels()，同时将c从它的parent的children中移除
 func (c *cancelCtx) cancel(removeFromParent bool, err error) {
 	if err == nil {
 		panic("context: internal error: missing cancel error")
@@ -431,11 +465,15 @@ func (c *cancelCtx) cancel(removeFromParent bool, err error) {
 //
 // Canceling this context releases resources associated with it, so code should
 // call cancel as soon as the operations running in this Context complete.
+// WithDeadline函数返回一个带有新截止时间的父上下文的副本。
+// note 如果父上下文的截止时间早于d，则WithDeadline(parent, d)在语义上等价于parent。
+// note 当截止时间到达、调用返回的取消函数或者父上下文的Done通道关闭时，返回的上下文的Done通道也会关闭。
+// 取消此上下文将释放与其关联的资源，因此代码应当在该上下文中运行的操作完成后尽快调用cancel函数。
 func WithDeadline(parent Context, d time.Time) (Context, CancelFunc) {
 	if parent == nil {
 		panic("cannot create context from nil parent")
 	}
-	if cur, ok := parent.Deadline(); ok && cur.Before(d) {
+	if cur, ok := parent.Deadline(); ok && cur.Before(d) { // todo 父ctx ddl更早，则直接返回cacel，ddl由父ctx来控制了
 		// The current deadline is already sooner than the new one.
 		return WithCancel(parent)
 	}
@@ -445,14 +483,14 @@ func WithDeadline(parent Context, d time.Time) (Context, CancelFunc) {
 	}
 	propagateCancel(parent, c)
 	dur := time.Until(d)
-	if dur <= 0 {
+	if dur <= 0 { // todo ddl已经到了，直接调用cancel；怎么还返回cancel了...不懂
 		c.cancel(true, DeadlineExceeded) // deadline has already passed
 		return c, func() { c.cancel(false, Canceled) }
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.err == nil {
-		c.timer = time.AfterFunc(dur, func() {
+		c.timer = time.AfterFunc(dur, func() { // note 直接上定时器，到期自己调用cancel
 			c.cancel(true, DeadlineExceeded)
 		})
 	}
@@ -520,6 +558,12 @@ func WithTimeout(parent Context, timeout time.Duration) (Context, CancelFunc) {
 // interface{}, context keys often have concrete type
 // struct{}. Alternatively, exported context key variables' static
 // type should be a pointer or interface.
+// WithValue 返回一个 parent 的副本，其中与 key 关联的值为 val。
+//
+// 仅将上下文值用于跨进程和 API 传输的请求范围数据，而不是将可选参数传递给函数。
+// note 提供的键必须是可比较的，并且不应该是字符串或任何其他内置类型，以避免在使用上下文的程序包之间发生冲突。
+// 使用 WithValue 的用户应该为键定义自己的类型。为了在分配给 interface{} 时避免分配，
+// 上下文键通常具有具体类型 struct{}。 或者，导出的上下文密钥变量的静态类型应该是指针或接口。
 func WithValue(parent Context, key, val any) Context {
 	if parent == nil {
 		panic("cannot create context from nil parent")
