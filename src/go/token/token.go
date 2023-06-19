@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package token defines constants representing the lexical tokens of the Go
+// Package token defines constants representing the lexical(词汇的) tokens of the Go
 // programming language and basic operations on tokens (printing, predicates).
 package token
 
@@ -12,6 +12,9 @@ import (
 	"unicode/utf8"
 )
 
+// Lexical tokens是指在编程语言中识别出的最小的、有意义的语法单元。
+// 每个token都代表着特定类型的语法结构，例如关键字、操作符、标识符、常量等。
+// 编译器或解释器通过扫描源代码并将其划分为一系列的tokens来解析程序。在大多数编程语言中，空格、制表符和换行符通常被忽略，不会作为独立的token出现
 // Token is the set of lexical tokens of the Go programming language.
 type Token int
 
@@ -91,7 +94,7 @@ const (
 	SEMICOLON // ;
 	COLON     // :
 	operator_end
-
+	// note 下面开始才是关键字，上面的都是运算符啥的
 	keyword_beg
 	// Keywords
 	BREAK
@@ -131,6 +134,7 @@ const (
 	additional_end
 )
 
+// note token列表，就是我们代码中可以使用的所有关键字
 var tokens = [...]string{
 	ILLEGAL: "ILLEGAL",
 
@@ -238,6 +242,7 @@ var tokens = [...]string{
 // token character sequence (e.g., for the token ADD, the string is
 // "+"). For all other tokens the string corresponds to the token
 // constant name (e.g. for the token IDENT, the string is "IDENT").
+// 当前Token(int)对应的string，如var、go...
 func (tok Token) String() string {
 	s := ""
 	if 0 <= tok && tok < Token(len(tokens)) {
@@ -263,6 +268,7 @@ const (
 // Precedence returns the operator precedence of the binary
 // operator op. If op is not a binary operator, the result
 // is LowestPrecedence.
+// 返回运算符的优先级，非运算符则优先级最低
 func (op Token) Precedence() int {
 	switch op {
 	case LOR:

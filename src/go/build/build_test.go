@@ -5,12 +5,12 @@
 package build
 
 import (
-	"internal/testenv"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"std/internal/testenv"
 	"strings"
 	"testing"
 )

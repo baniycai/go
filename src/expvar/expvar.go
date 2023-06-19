@@ -19,6 +19,8 @@
 // this way, link this package into your program:
 //
 //	import _ "expvar"
+//
+// note 注释在最下面，看一下即可
 package expvar
 
 import (
@@ -366,6 +368,12 @@ func memstats() any {
 	return *stats
 }
 
+// note 通过import _ "expvar"来导入即可，它会给你初始化一个handler，以json的格式返回vars这个map中保存的key:val键值对
+// 这个键值对的内容是通过Publish这个方法来注册的，vars的key是这里的cmdline/memstats，没啥用，val是Func
+// 这个Func的设计蛮牛逼的，定义是type Func func() any，且有String()和Value()两个方法，String()是获取Func(f())的返回值并将其json格式化返回
+// 这里通过Func把cmdline和memstats这两个普通的func包了一层，直接增强了它们的功能
+// note 这里的cmdline是获取命令行参数，memstats是获取内存分配情况
+// note 具体功能可以细看叭，返回就是以json的格式返回命令行参数和内存情况，debug用的叭
 func init() {
 	http.HandleFunc("/debug/vars", expvarHandler)
 	Publish("cmdline", Func(cmdline))

@@ -11,9 +11,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"std/text/template"
+	"std/text/template/parse"
 	"sync"
-	"text/template"
-	"text/template/parse"
 )
 
 // Template is a specialized Template from "text/template" that produces a safe
@@ -37,7 +37,7 @@ var escapeOK = fmt.Errorf("template escaped correctly")
 type nameSpace struct {
 	mu      sync.Mutex
 	set     map[string]*Template
-	escaped bool
+	escaped bool // 是否已调用Execute
 	esc     escaper
 }
 
@@ -183,6 +183,12 @@ func (t *Template) DefinedTemplates() string {
 // is considered empty and will not replace an existing template's body.
 // This allows using Parse to add new named template definitions without
 // overwriting the main template body.
+// Parse函数将文本作为模板正文解析给t使用。
+// 在文本中，命名的模板定义({{define...}}或{{block...}}语句)会定义与t相关联的附加模板，并从t自身的定义中删除。
+// 在对t或任何关联模板进行首次Execute操作之前，可以在连续调用Parse时重新定义模板。
+// 正文仅包含空格和注释的模板定义被视为空，并且不会替换现有模板的正文。
+// 这使得可以使用Parse添加新的命名模板定义，而不会覆盖主模板正文。
+// text={{if .}}<{{template "X"}}>{{end}}{{define "X"}}foo{{end}}的格式
 func (t *Template) Parse(text string) (*Template, error) {
 	if err := t.checkCanParse(); err != nil {
 		return nil, err

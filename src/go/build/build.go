@@ -12,9 +12,6 @@ import (
 	"go/build/constraint"
 	"go/doc"
 	"go/token"
-	"internal/buildcfg"
-	"internal/goroot"
-	"internal/goversion"
 	"io"
 	"io/fs"
 	"os"
@@ -23,12 +20,16 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"std/internal/buildcfg"
+	"std/internal/goroot"
+	"std/internal/goversion"
 	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 )
 
+// note 跟构建当前项目相关的上下文
 // A Context specifies the supporting context for a build.
 type Context struct {
 	GOARCH string // target architecture

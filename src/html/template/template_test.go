@@ -7,7 +7,7 @@ package template_test
 import (
 	"bytes"
 	"encoding/json"
-	. "html/template"
+	. "std/html/template"
 	"strings"
 	"testing"
 	"text/template/parse"
