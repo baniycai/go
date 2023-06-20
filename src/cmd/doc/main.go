@@ -40,6 +40,15 @@
 // all its visible symbols. The argument must identify a package.
 //
 // For complete documentation, run "go help doc".
+// Doc（通常作为 go doc 运行）接受零个、一个或两个参数。
+// 零参数： go doc 显示当前目录中包的文档。
+// 一个参数： go doc <pkg> go doc <sym>[.<methodOrField>] go doc [<pkg>.]<sym>[.<methodOrField>] go doc [<pkg>.][<sym>.] <methodOrField> 此列表中第一个成功的项目是其文档被打印的项目。
+// 如果有符号但没有包，则选择当前目录中的包。但是，如果参数以大写字母开头，则始终假定它是当前目录中的符号。
+// 两个参数： go doc <pkg> <sym>[.<methodOrField>] 显示包、符号和方法或字段的文档。
+// 第一个参数必须是完整的包路径。这类似于 godoc 命令的命令行用法。
+// 对于命令，除非存在 -cmd 标志，否则“go doc 命令”仅显示包的包级文档。
+// -src 标志使 doc 打印符号的完整源代码，例如结构体、函数或方法的主体。
+// -all 标志使 doc 打印包的所有文档及其所有可见符号。该参数必须标识一个包。
 package main
 
 import (

@@ -27,6 +27,7 @@ const (
 )
 
 // Value represents a metric value returned by the runtime.
+// 某个指标值，由运行时填充
 type Value struct {
 	kind    ValueKind
 	scalar  uint64         // contains scalar values for scalar Kinds.

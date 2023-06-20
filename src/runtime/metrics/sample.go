@@ -10,6 +10,7 @@ import (
 )
 
 // Sample captures a single metric sample.
+// note 想要抽样的指标名称；初始化好Name后，将Sample传入Read(m []Sample)，它会帮你填充Value的值
 type Sample struct {
 	// Name is the name of the metric sampled.
 	//
@@ -42,6 +43,12 @@ func runtime_readMetrics(unsafe.Pointer, int, int)
 //
 // Sample values with names not appearing in All will have their Value populated
 // as KindBad to indicate that the name is unknown.
+// note 读取填充给定的度量样本切片中的每个值字段。所需指标应以适当的名称出现在切片中。
+// note 鼓励此 API 的用户在调用之间重复使用相同的切片以提高效率，但不要求这样做。
+// 请注意，重用有一些注意事项。值得注意的是，当具有该值的读取未完成时，不应读取或操作该值；那是一场数据竞赛。
+// 此属性包括指针类型的值（例如，Float64Histogram），其底层存储将在可能时由 Read 重用。
+// note 为了在并发设置中安全地使用这些值，必须深度复制所有数据。同时执行多个 Read 调用是安全的，但它们的参数必须不共享底层内存。
+// 如有疑问，请从头开始创建一个新的 []Sample，这始终是安全的，但可能效率低下。名称未出现在 All 中的示例值会将其值填充为 KindBad 以指示名称未知。
 func Read(m []Sample) {
 	runtime_readMetrics(unsafe.Pointer(&m[0]), len(m), cap(m))
 }

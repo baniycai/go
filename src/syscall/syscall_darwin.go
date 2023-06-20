@@ -330,7 +330,7 @@ func Getdirentries(fd int, buf []byte, basep *uintptr) (n int, err error) {
 	return n, nil
 }
 
-// 这里的方法其实都是调用C的方法，也就是系统调用叭，当然，是通过汇编来调用的。fn是要调用的系统调用(我们传入的fn是go的，但是没有实现，其实它是通过汇编来跟C的函数关联起来的)，后面跟着几个参数。传入uintptr的原因是在汇编调用的时候需要用到方法和它的几个参数的地址
+// note 这里的方法其实都是调用C的方法，也就是系统调用叭，当然，是通过汇编来调用的。fn是要调用的系统调用(我们传入的fn是go的，但是没有实现，其实它是通过汇编来跟C的函数关联起来的)，后面跟着几个参数。传入uintptr的原因是在汇编调用的时候需要用到方法和它的几个参数的地址
 // Implemented in the runtime package (runtime/sys_darwin.go)
 func syscall(fn, a1, a2, a3 uintptr) (r1, r2 uintptr, err Errno)
 func syscall6(fn, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2 uintptr, err Errno)

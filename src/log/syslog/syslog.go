@@ -115,6 +115,7 @@ func New(priority Priority, tag string) (*Writer, error) {
 // If network is empty, Dial will connect to the local syslog server.
 // Otherwise, see the documentation for net.Dial for valid values
 // of network and raddr.
+// 跟指定的address的日志守护进程建立连接，如果没有提供address，则连接到本地的日志syslog服务
 func Dial(network, raddr string, priority Priority, tag string) (*Writer, error) {
 	if priority < 0 || priority > LOG_LOCAL7|LOG_DEBUG {
 		return nil, errors.New("log/syslog: invalid priority")

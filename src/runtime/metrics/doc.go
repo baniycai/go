@@ -189,4 +189,51 @@ Below is the full list of supported metrics, ordered lexicographically.
 		Distribution of the time goroutines have spent in the scheduler
 		in a runnable state before actually running.
 */
+/*
+note 包指标提供了一个稳定的接口来访问由 Go 运行时导出的实现定义的指标。
+此包类似于 runtime.ReadMemStats 和 debug.ReadGCStats 等现有功能，但更通用。
+此包定义的指标集可能会随着运行时本身的发展而发展，并且还支持跨 Go 实现的变化，其相关指标集可能不相交。
+接口指标由字符串键指定，而不是例如结构中的字段名称。
+note All 返回的 Descriptions 切片中始终提供受支持指标的完整列表。每个描述还包括有关指标的有用信息。因此，鼓励此 API 的用户对 All 返回的切片定义的支持指标进行采样，以保持跨 Go 版本的兼容性。
+当然，有时会出现阅读特定指标至关重要的情况。对于这些情况，我们鼓励用户使用构建标签，虽然指标可能会被弃用和删除，但用户应该认为这是一个例外且罕见的事件，与特定 Go 实现中的非常大的变化相吻合。
+每个指标键也有一个描述指标值格式的“种类”。
+为了不破坏这个包的用户，给定指标的“种类”保证不会改变。如果它必须改变，那么将引入一个带有新密钥和新“种类”的新度量。
+指标键格式 如前所述，指标键是字符串。它们的格式简单且定义明确，旨在供人类和机器阅读。
+它分为两个部分，用冒号分隔：根路径和单元。选择将单位包含在密钥中是出于兼容性的考虑：如果度量的单位发生变化，其语义可能也会发生变化，并且应该引入新的密钥。
+有关指标键的路径和单位格式的精确定义的更多详细信息，请参阅 Description 结构的 Name 字段的文档。关于浮点数的说明 此包支持其值具有浮点表示的指标。
+为了提高易用性，该包承诺永远不会产生以下几类浮点值：NaN、无穷大。支持的指标 note 下面是支持的指标的完整列表，按字典顺序排列。
+/cgo/go-to-c-calls:calls 当前进程从 Go 到 C 的调用计数。
+/gc/cycles/automatic:gc-cycles Go 运行时生成的已完成 GC 周期数。
+/gc/cycles/forced:gc-cycles 应用程序强制完成的 GC 周期数。
+/gc/cycles/total:gc-cycles 所有已完成的 GC 周期的计数。
+/gc/heap/allocs-by-size:bytes 按近似大小分配堆分配。请注意，这不包括 /gc/heap/tiny/allocs:objects 定义的微型对象，仅包括微型块。
+/gc/heap/allocs:bytes 应用程序分配给堆的内存总量。
+/gc/heap/allocs:objects 应用程序触发的堆分配的累积计数。请注意，这不包括 /gc/heap/tiny/allocs:objects 定义的微型对象，仅包括微型块。
+/gc/heap/frees-by-size:bytes 按近似大小分配的已释放堆。请注意，这不包括 /gc/heap/tiny/allocs:objects 定义的微型对象，仅包括微型块。
+/gc/heap/frees:bytes 垃圾收集器释放的堆内存的累积总和。
+/gc/heap/frees:objects 其存储被垃圾收集器释放的堆分配的累积计数。请注意，这不包括 /gc/heap/tiny/allocs:objects 定义的微型对象，仅包括微型块。
+/gc/heap/goal:bytes GC 周期结束时的堆大小目标。 /gc/heap/objects:objects 占用堆内存的活动或未清理的对象数。
+/gc/heap/tiny/allocs:objects 打包成块的小分配计数。这些分配与其他分配分开计算，因为运行时不跟踪每个单独的分配，只跟踪它们的块。每个块都已按大小分配和释放。
+/gc/limiter/last-enabled:gc-cycle 上次启用 GC CPU 限制器时的 GC 周期。此指标对于诊断内存不足错误的根本原因很有用，因为当 GC 的 CPU 时间过高时，限制器会用内存换取 CPU 时间。这最有可能在使用 SetMemoryLimit 时发生。第一个 GC 周期是周期 1，因此值为 0 表示它从未启用。
+/gc/pauses:seconds 分发与 GC 相关的 stop-the-world 暂停延迟。
+/gc/stack/starting-size:bytes 新协程的堆栈大小。
+/memory/classes/heap/free:bytes 完全空闲并有资格归还给底层系统但尚未归还的内存。此指标是运行时对物理内存支持的可用地址空间的估计。
+/memory/classes/heap/objects:bytes 还没有被垃圾收集器标记为空闲的存活对象和死对象占用的内存。
+/memory/classes/heap/released:bytes 完全空闲并已归还给底层系统的内存。此指标是运行时对仍映射到进程但不受物理内存支持的可用地址空间的估计。
+/memory/classes/heap/stacks:bytes 从为堆栈空间保留的堆中分配的内存，无论它当前是否在使用中。
+/memory/classes/heap/unused:bytes 为堆对象保留但当前未用于保存堆对象的内存。
+/memory/classes/metadata/mcache/free:bytes 为运行时 mcache 结构保留但未使用的内存。
+/memory/classes/metadata/mcache/inuse:bytes 当前正在使用的运行时 mcache 结构占用的内存。
+/memory/classes/metadata/mspan/free:bytes 为运行时 mspan 结构保留但未使用的内存。
+/memory/classes/metadata/mspan/inuse:bytes 当前正在使用的运行时 mspan 结构占用的内存。
+/memory/classes/metadata/other:bytes 保留或用于保存运行时元数据的内存。
+/memory/classes/os-stacks:bytes 底层操作系统分配的堆栈内存。
+/memory/classes/other:bytes 执行跟踪缓冲区使用的内存、用于调试运行时的结构、终结器和分析器特殊功能等。
+/memory/classes/profiling/buckets:bytes 用于分析的堆栈跟踪哈希映射使用的内存。
+/memory/classes/total:bytes Go 运行时映射到当前进程的所有内存，可读写。请注意，这不包括通过 cgo 或 syscall 包调用的代码映射的内存。
+/memory/classes 中所有指标的总和。
+/sched/gomaxprocs:threads 当前 runtime.GOMAXPROCS 设置，或者可以同时执行用户级 Go 代码的操作系统线程数。
+/sched/goroutines:goroutines 活动 goroutines 的计数。
+/sched/latencies:seconds 在实际运行之前 goroutines 在调度程序中处于可运行状态的时间分布。
+*/
 package metrics

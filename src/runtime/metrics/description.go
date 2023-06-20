@@ -29,6 +29,13 @@ type Description struct {
 	// specifies the buckets' unit.
 	//
 	// A complete name might look like "/memory/heap/free:bytes".
+	//名称是包含单位的指标的全名。度量的格式可以由以下正则表达式描述。 ^(?P<name>/[^:]+):(?P<unit>[^:*/]+(?:[*/][^:*/]+)*)$
+	//格式拆分name 分成两个部分，用冒号分隔：一个总是以 / 开头的路径，和一个机器可解析的单元。
+	//该名称可以在 / 字符之间包含任何有效的 Unicode 代码点，但按照惯例会尽量使用小写字符和连字符。
+	//note 这种路径的一个例子可能是“/memory/heap/free”。按照惯例，单位是一系列小写英文单位名称（单数或复数），不带由“*”或“/”分隔的前缀。
+	//单位名称可以包含任何不是定界符的有效 Unicode 代码点。单位的示例可能是“秒”、“字节”、“字节/秒”、“cpu-seconds”、“byte*cpu-seconds”和“bytes/second/second”。
+	//对于直方图，可能适用多个单位。例如，桶的单位和计数。按照惯例，对于直方图，计数的单位始终是“样本”，样本类型由指标的名称表明，而名称中的单位指定桶的单位。
+	//note 完整的名称可能类似于“/memory/heap/free:bytes”。
 	Name string
 
 	// Description is an English language sentence describing the metric.

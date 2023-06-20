@@ -12,6 +12,8 @@
 // printed does not end in a newline, the logger will add one.
 // The Fatal functions call os.Exit(1) after writing the log message.
 // The Panic functions call panic after writing the log message.
+// note 很常规的日志吧，主要是提供了一个设置prefix+time这些前缀的功能，通过flag(int)的bit位来控制来打印哪些，其它的就是常规的打印消息、换行之类，然后就没了
+// 感觉还是比较原始的，没有任何优化啥的，日志想打就打，不考虑你啥性能，怪不得那么多开源的日志框架
 package log
 
 import (
@@ -38,6 +40,8 @@ import (
 // while flags Ldate | Ltime | Lmicroseconds | Llongfile produce,
 //
 //	2009/01/23 01:23:23.123123 /a/b/c/d.go:23: message
+//
+// note 通过bit位来控制要打印哪些额外的信息，牛批！
 const (
 	Ldate         = 1 << iota     // the date in the local time zone: 2009/01/23
 	Ltime                         // the time in the local time zone: 01:23:23
@@ -114,6 +118,8 @@ func itoa(buf *[]byte, i int, wid int) {
 //   - date and/or time (if corresponding flags are provided),
 //   - file and line number (if corresponding flags are provided),
 //   - l.prefix (if it's not blank and Lmsgprefix is set).
+//
+// note 根据flag的值，来往buf写入prefix、data、time和file line number等等信息
 func (l *Logger) formatHeader(buf *[]byte, t time.Time, file string, line int) {
 	if l.flag&Lmsgprefix == 0 {
 		*buf = append(*buf, l.prefix...)
@@ -182,7 +188,7 @@ func (l *Logger) Output(calldepth int, s string) error {
 		// Release lock while getting caller info - it's expensive.
 		l.mu.Unlock()
 		var ok bool
-		_, file, line, ok = runtime.Caller(calldepth)
+		_, file, line, ok = runtime.Caller(calldepth) // 获取调用该方法的文件及行数，当然，具体还要取决于calldepth的值
 		if !ok {
 			file = "???"
 			line = 0
@@ -190,12 +196,12 @@ func (l *Logger) Output(calldepth int, s string) error {
 		l.mu.Lock()
 	}
 	l.buf = l.buf[:0]
-	l.formatHeader(&l.buf, now, file, line)
-	l.buf = append(l.buf, s...)
+	l.formatHeader(&l.buf, now, file, line) // 写prefix和time等信息
+	l.buf = append(l.buf, s...)             // 写入欲打印的信息
 	if len(s) == 0 || s[len(s)-1] != '\n' {
-		l.buf = append(l.buf, '\n')
+		l.buf = append(l.buf, '\n') // 补换行
 	}
-	_, err := l.out.Write(l.buf)
+	_, err := l.out.Write(l.buf) // 写日志
 	return err
 }
 
@@ -220,10 +226,10 @@ func (l *Logger) Print(v ...any) {
 // Println calls l.Output to print to the logger.
 // Arguments are handled in the manner of fmt.Println.
 func (l *Logger) Println(v ...any) {
-	if atomic.LoadInt32(&l.isDiscard) != 0 {
+	if atomic.LoadInt32(&l.isDiscard) != 0 { // 是否丢弃
 		return
 	}
-	l.Output(2, fmt.Sprintln(v...))
+	l.Output(2, fmt.Sprintln(v...)) // 逃过两层调用栈，Output是一层，Caller是一层，最后就得到了调用Println的地方
 }
 
 // Fatal is equivalent to l.Print() followed by a call to os.Exit(1).
