@@ -9,8 +9,10 @@ import "sync/atomic"
 // fdMutex is a specialized synchronization primitive that manages
 // lifetime of an fd and serializes access to Read, Write and Close
 // methods on FD.
+// fdMutex 是一种专门的同步原语，它管理 fd 的生命周期并序列化对 FD 上的 Read、Write 和 Close 方法的访问。
 type fdMutex struct {
 	state uint64
+	// 等待锁的时候是使用下面两个参数之一去等待的，释放锁的时候也是用下面两个参数
 	rsema uint32
 	wsema uint32
 }
@@ -22,6 +24,7 @@ type fdMutex struct {
 // 20 bits - total number of references (read+write+misc).
 // 20 bits - number of outstanding read waiters.
 // 20 bits - number of outstanding write waiters.
+// 这个设计也是蛮吊的，通过一个int64的64个bid就可以记录一大堆的状态信息，直接省空间
 const (
 	mutexClosed  = 1 << 0
 	mutexRLock   = 1 << 1
@@ -68,7 +71,7 @@ func (mu *fdMutex) incref() bool {
 
 // 当多个 goroutine 竞争同一个文件描述符时，需要一种方式来保证它们能够按照正确的顺序访问该文件描述符。
 // 为了实现对文件描述符的安全访问，Go 语言使用了信号量机制来进行同步。
-// 当一个 goroutine 需要访问文件描述符时，它会先获取该文件描述符的锁，然后执行相应的操作。
+// note 当一个 goroutine 需要访问文件描述符时，它会先获取该文件描述符的锁，然后执行相应的操作。
 // 在文件描述符使用完毕后，该 goroutine 再释放该文件描述符的锁，以便其他 goroutine 能够获取该锁并继续访问该文件描述符。
 // 在 increfAndClose 方法中，如果发生了错误导致文件描述符无法正常关闭，就需要将引用计数减一以防止泄露。此时，需要释放该文件描述符的锁，以便其他竞争该文件描述符的 goroutine 能够重新尝试关闭该文件描述符。
 // 因此，在 fd_mutex.go 文件的 increfAndClose 方法中调用 runtime_Semrelease 方法是为了释放该文件描述符对应的信号量，并且确保其他 goroutine 能够重新尝试关闭该文件描述符。
@@ -76,20 +79,19 @@ func (mu *fdMutex) incref() bool {
 // 在 Go 语言中，用来保护文件描述符的同步机制具体是通过使用信号量（Semaphore）实现的。Semaphore 是一种通用的同步机制，它可以对共享资源进行计数并控制并发访问。在 Go 语言中，每个文件描述符都有一个与之对应的信号量，用于保证该文件描述符的正确访问。
 //Semaphore 的主要特点是可以动态地调整其内部计数器的值，并根据该计数器的值来决定是否允许进程或线程继续执行。在 Go 语言中，可以通过系统调用（如 sem_init、sem_wait 和 sem_post 等函数）来创建和操作 Semaphore。
 //在 fd_mutex.go 文件中，对于每个文件描述符，都会创建一个 sync.Mutex 类型的互斥锁和一个 sema 类型的信号量。其中，互斥锁用于保护文件描述符的读写操作，而信号量则用于控制 goroutine 对该文件描述符的访问顺序。
-//在 increfAndClose 方法中，如果发生了错误导致文件描述符无法正常关闭，就需要将引用计数减一以防止泄露。此时，需要释放该文件描述符的信号量，以便其他竞争该文件描述符的 goroutine 能够重新尝试关闭该文件描述符。
-//因此，在 fd_mutex.go 文件的 increfAndClose 方法中调用 runtime_Semrelease 方法是为了释放该文件描述符对应的信号量，并确保其他 goroutine 能够重新尝试关闭该文件描述符。
 
 // increfAndClose sets the state of mu to closed.
 // It returns false if the file was already closed.
+// note 主要是操作文件描述符的信号量的state，增加引用计数，清空读写等待位数，并唤醒所有在等待读写的协程；这里没有使用到锁，所有用的都是原子操作
 func (mu *fdMutex) increfAndClose() bool {
 	for {
 		// note state 存储了文件描述符的引用计数和一些标志位信息，低 32 位存储了当前引用计数值，高 32 位存储了一些状态标志位，如是否已经关闭、是否可以读、是否可以写等等
 		old := atomic.LoadUint64(&mu.state)
-		if old&mutexClosed != 0 { // 已关闭
+		if old&mutexClosed != 0 { // 末位bid为1，则为已关闭
 			return false
 		}
 		// Mark as closed and acquire a reference.
-		new := (old | mutexClosed) + mutexRef // +8是为了跳过最后保留的3位吧？
+		new := (old | mutexClosed) + mutexRef // 置为关闭，且引用+1
 		if new&mutexRefMask == 0 {
 			panic(overflowMsg)
 		}
@@ -101,7 +103,7 @@ func (mu *fdMutex) increfAndClose() bool {
 		if atomic.CompareAndSwapUint64(&mu.state, old, new) {
 			// Wake all read and write waiters,
 			// they will observe closed flag after wakeup.
-			// note 将读写统计数量减1，并唤醒所有在等待读写的协程
+			// note 循环唤醒所有在等待读写的协程，直到读写统计数量减为0，
 			for old&mutexRMask != 0 {
 				old -= mutexRWait
 				runtime_Semrelease(&mu.rsema)
@@ -146,30 +148,30 @@ func (mu *fdMutex) rwlock(read bool) bool {
 		mutexMask = mutexWMask
 		mutexSema = &mu.wsema
 	}
-	for {
+	for { // 死循环，直到成功抢占
 		old := atomic.LoadUint64(&mu.state)
 		if old&mutexClosed != 0 {
 			return false
 		}
 		var new uint64
-		if old&mutexBit == 0 {
+		if old&mutexBit == 0 { // 该锁还没有被抢占
 			// Lock is free, acquire it.
-			new = (old | mutexBit) + mutexRef
+			new = (old | mutexBit) + mutexRef // 抢占锁，并增加引用计数
 			if new&mutexRefMask == 0 {
 				panic(overflowMsg)
 			}
 		} else {
 			// Wait for lock.
-			new = old + mutexWait
+			new = old + mutexWait // 锁已被抢，增加等待计数
 			if new&mutexMask == 0 {
 				panic(overflowMsg)
 			}
 		}
-		if atomic.CompareAndSwapUint64(&mu.state, old, new) {
-			if old&mutexBit == 0 {
+		if atomic.CompareAndSwapUint64(&mu.state, old, new) { // 修改状态；因为是cas，所以并发问题没影响
+			if old&mutexBit == 0 { // 该锁还没有被抢占，在上面的new中已经抢占锁，并增加了引用计数；直接返回true
 				return true
 			}
-			runtime_Semacquire(mutexSema)
+			runtime_Semacquire(mutexSema) // note 锁已被抢占，这里估计是阻塞等待获取
 			// The signaller has subtracted mutexWait.
 		}
 	}
@@ -197,12 +199,12 @@ func (mu *fdMutex) rwunlock(read bool) bool {
 			panic("inconsistent poll.fdMutex")
 		}
 		// Drop lock, drop reference and wake read waiter if present.
-		new := (old &^ mutexBit) - mutexRef
-		if old&mutexMask != 0 {
+		new := (old &^ mutexBit) - mutexRef // 置空抢锁的标志位，并将引用减1
+		if old&mutexMask != 0 {             // 有在等待锁的，则将等待数减1
 			new -= mutexWait
 		}
 		if atomic.CompareAndSwapUint64(&mu.state, old, new) {
-			if old&mutexMask != 0 {
+			if old&mutexMask != 0 { // 这里应该是唤醒在等待锁的，唤醒一位
 				runtime_Semrelease(mutexSema)
 			}
 			return new&(mutexClosed|mutexRefMask) == mutexClosed

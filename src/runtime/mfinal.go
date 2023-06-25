@@ -488,6 +488,24 @@ okarg:
 // Note: KeepAlive should only be used to prevent finalizers from
 // running prematurely. In particular, when used with unsafe.Pointer,
 // the rules for valid uses of unsafe.Pointer still apply.
+/*
+note KeepAlive 将其参数标记为当前可达。这可以确保在程序中调用 KeepAlive 之前，不会释放该对象，并且不会运行其终结器。
+一个非常简化的示例，显示需要 KeepAlive 的位置：
+
+//	type File struct { d int }
+//	d, err := syscall.Open("/file/path", syscall.O_RDONLY, 0)
+//	// ... do something if err != nil ...
+//	p := &File{d}
+//	runtime.SetFinalizer(p, func(p *File) { syscall.Close(p.d) })
+//	var buf [10]byte
+//	n, err := syscall.Read(p.d, buf[:])
+//	// Ensure p is not finalized until Read returns.   确保 p 在 Read 返回之前尚未完成
+//	runtime.KeepAlive(p)
+//	// No more uses of p after this point.
+
+note 如果没有 KeepAlive 调用，终结器可以在 syscall.Read 开始时运行，在 syscall.Read 进行实际系统调用之前关闭文件描述符。
+note 注意：KeepAlive 只能用于防止终结器过早运行。特别是，当与 unsafe.Pointer 一起使用时，unsafe.Pointer 的有效使用规则仍然适用。
+*/
 func KeepAlive(x any) {
 	// Introduce a use of x that the compiler can't eliminate.
 	// This makes sure x is alive on entry. We need x to be alive

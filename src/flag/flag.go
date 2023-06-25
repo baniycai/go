@@ -465,6 +465,7 @@ func (f *FlagSet) Visit(fn func(*Flag)) {
 
 // Visit visits the command-line flags in lexicographical order, calling fn
 // for each. It visits only those flags that have been set.
+// note 这个设计蛮好的，之前有在其它地方看过；传入一个fn，由内部来遍历所有变量，将这些变量作为参数传入fn。在设计上跟初始化配置文件的那个option差不多
 func Visit(fn func(*Flag)) {
 	CommandLine.Visit(fn)
 }

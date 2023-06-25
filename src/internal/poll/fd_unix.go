@@ -91,7 +91,7 @@ func (fd *FD) destroy() error {
 // Close closes the FD. The underlying file descriptor is closed by the
 // destroy method when there are no remaining references.
 func (fd *FD) Close() error {
-	if !fd.fdmu.increfAndClose() { // 修改状态(state),唤醒等待读写的协程
+	if !fd.fdmu.increfAndClose() { // 修改状态(state，添加引用，置空读写等待数),唤醒等待读写的协程
 		return errClosing(fd.isFile)
 	}
 
@@ -100,7 +100,7 @@ func (fd *FD) Close() error {
 	// the final decref will close fd.sysfd. This should happen
 	// fairly quickly, since all the I/O is non-blocking, and any
 	// attempts to block in the pollDesc will return errClosing(fd.isFile).
-	fd.pd.evict() // 从轮询状态中删除被关闭的文件描述符
+	fd.pd.evict() // 从轮询状态中删除被关闭的文件描述符，提高轮训效率
 
 	// The call to decref will call destroy if there are no other
 	// references.
@@ -112,6 +112,8 @@ func (fd *FD) Close() error {
 	// may be blocking, and that would block the Close.
 	// No need for an atomic read of isBlocking, increfAndClose means
 	// we have exclusive access to fd.
+	// 等待描述符关闭。如果这是唯一的引用，则它已经关闭。仅当文件未设置为阻塞模式时才等待，否则任何当前 I/O 可能会阻塞，
+	//从而阻塞关闭。不需要 isBlocking 的原子读取，increfAndClose 意味着我们可以独占访问 fd。
 	if fd.isBlocking == 0 {
 		runtime_Semacquire(&fd.csema)
 	}
@@ -137,11 +139,14 @@ func (fd *FD) SetBlocking() error {
 // The same is true of socket implementations on many systems.
 // See golang.org/issue/7812 and golang.org/issue/16266.
 // Use 1GB instead of, say, 2GB-1, to keep subsequent reads aligned.
+// note Darwin 和 FreeBSD 无法一次读取或写入 2GB 以上的文件，即使在 64 位系统上也是如此。许多系统上的套接字实现也是如此。
+// 请参阅 golang.org/issue/7812 和 golang.org/issue/16266。
+// 使用 1GB 而不是 2GB-1，以保持后续读取对齐。
 const maxRW = 1 << 30
 
 // Read implements io.Reader.
 func (fd *FD) Read(p []byte) (int, error) {
-	if err := fd.readLock(); err != nil {
+	if err := fd.readLock(); err != nil { // 加锁，这里是通过原子操作来完成的
 		return 0, err
 	}
 	defer fd.readUnlock()
@@ -159,7 +164,7 @@ func (fd *FD) Read(p []byte) (int, error) {
 	if fd.IsStream && len(p) > maxRW {
 		p = p[:maxRW]
 	}
-	for {
+	for { // 循环调用系统调用，直到读取完成。IO相关的系统调用基本都是要传入fd，然后还有一堆地址值(uintptr类型)
 		n, err := ignoringEINTRIO(syscall.Read, fd.Sysfd, p)
 		if err != nil {
 			n = 0

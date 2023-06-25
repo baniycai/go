@@ -14,8 +14,11 @@ import (
 )
 
 // Network file descriptor.
+// 按照linux中一切皆文档的思想，每个网络连接也有一个fd，即文件描述符
 type netFD struct {
-	pfd poll.FD
+	// note 真正的读写是基于pfd的，也就是说它才是真正的fd叭
+	pfd poll.FD // 略奇怪，也是文件描述符，不过 The net and os packages use this type as a
+	// field of a larger type representing a network connection or OS file，好像是说比netFD更大，更高一级；
 
 	// immutable until Close
 	family      int

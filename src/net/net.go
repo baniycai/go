@@ -76,6 +76,46 @@ On Plan 9, the resolver always accesses /net/cs and /net/dns.
 On Windows, in Go 1.18.x and earlier, the resolver always used C
 library functions, such as GetAddrInfo and DnsQuery.
 */
+/*
+net包为网络I/O提供了一个可移植的接口，包括TCP/IP、UDP、域名解析和Unix域套接字。
+note 尽管该包提供了对低级网络原语的访问，但大多数客户端只需要 Dial、Listen 和 Accept 函数以及关联的 Conn 和 Listener 接口提供的基本接口。
+crypto/tls 包使用相同的接口和类似的 Dial 和 Listen 函数。
+Dial 函数连接到服务器：
+    conn, err := net.Dial("tcp", "golang.org:80")
+	if err != nil {
+		// handle error
+	}
+	fmt.Fprintf(conn, "GET / HTTP/1.0\r\n\r\n")
+	status, err := bufio.NewReader(conn).ReadString('\n')
+	// ...
+
+Listen 函数创建服务器：
+    ln, err := net.Listen("tcp", ":8080")
+	if err != nil {
+		// handle error
+	}
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			// handle error
+		}
+		go handleConnection(conn)
+	}
+
+名称解析 解析域名的方法是间接使用 Dial 等函数，还是直接使用 LookupHost 和 LookupAddr 等函数，因操作系统而异。在 Unix 系统上，解析器有两个解析名称的选项。
+note 它可以使用纯 Go 解析器将 DNS 请求直接发送到 /etc/resolv.conf 中列出的服务器，也可以使用基于 cgo 的解析器调用 C 库例程（例如 getaddrinfo 和 getnameinfo）。
+note 默认情况下，使用纯Go解析器，因为阻塞的DNS请求仅消耗一个goroutine，而阻塞的C调用消耗操作系统线程。
+当 cgo 可用时，在多种情况下会使用基于 cgo 的解析器：在不允许程序直接发出 DNS 请求的系统 (OS X) 上、当 LOCALDOMAIN 环境变量存在时（即使为空）、
+当 ASR_CONFIG 环境变量非空（仅限 OpenBSD）时，当 /etc/resolv.conf 或 /etc/nsswitch.conf 指定使用 Go 解析器未实现的功能时，
+RES_OPTIONS 或 HOSTALIASES 环境变量非空，并且当要查找的名称以 .local 结尾或者是 mDNS 名称时。
+可以通过将 GODEBUG 环境变量（请参阅包运行时）的 netdns 值设置为 go 或 cgo 来覆盖解析器决策，
+如下所示：
+export GODEBUG=netdns=go # 强制纯 Go 解析器
+export GODEBUG=netdns=cgo # 强制本机解析器(cgo, win32)
+在构建 Go 源代码树时，也可以通过设置 netgo 或 netcgo 构建标签来强制执行该决定。数字 netdns 设置（如 GODEBUG=netdns=1）会导致解析器打印有关其决策的调试信息。
+要在打印调试信息的同时强制使用特定解析器，请通过加号连接两个设置，如 GODEBUG=netdns=go+1 中。在计划 9 中，解析器始终访问 /net/cs 和 /net/dns。
+在 Windows 上，Go 1.18.x 及更早版本中，解析器始终使用 C 库函数，例如 GetAddrInfo 和 DnsQuery。
+*/
 package net
 
 import (
@@ -110,7 +150,7 @@ type Addr interface {
 // Conn is a generic stream-oriented network connection.
 //
 // Multiple goroutines may invoke methods on a Conn simultaneously.
-// 简单地理解，其底层的IO就是网线或者说网卡吧，读从网卡读，写写到网卡
+// note 简单地理解，其底层的IO就是网线或者说网卡吧，读从网卡读，写写到网卡；算是golang网络相关的操作中一个相当重要的接口
 type Conn interface {
 	// Read reads data from the connection.
 	// Read can be made to time out and return an error after a fixed

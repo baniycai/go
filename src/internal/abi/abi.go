@@ -114,6 +114,15 @@ func (b *IntArgRegBitmap) Get(i int) bool {
 // compile-time error.
 //
 // Implemented as a compile intrinsic.
+// FuncPCABI0 应该是指函数的 ABI（Application Binary Interface）版本 0。
+// note 在计算机科学中，ABI定义了如何在二进制级别上与编译器、操作系统和硬件交互。
+//
+// 在函数调用期间，编译器必须遵循特定的ABI规范，以确保正确地传递参数、返回值以及处理内存等问题。
+// 不同的ABI可能会使用不同的寄存器、堆栈布局和对齐方式来实现这些目标。
+//
+// 因此，FuncPCABI0 可能代表与某个函数相关的ABI版本号或ABI名称，其具体含义取决于上下文。
+
+// FuncPCABI0 返回函数 f 的入口 PC，它必须是定义为 ABI0 的函数的直接引用。否则就是编译时错误。作为编译内在函数实现
 func FuncPCABI0(f any) uintptr
 
 // FuncPCABIInternal returns the entry PC of the function f. If f is a
